@@ -61,6 +61,7 @@ const Checkout = () => {
   const [customerData, setCustomerData] = useState({
     firstName: '',
     lastName: '',
+    email: '',
     phone: '',
     detailedAddress: '',
     referencePoint: '',
@@ -123,12 +124,23 @@ const Checkout = () => {
   };
 
   const validateForm = () => {
-    const { firstName, lastName, phone } = customerData;
+    const { firstName, lastName, email, phone } = customerData;
     
-    if (!firstName.trim() || !lastName.trim() || !phone.trim()) {
+    if (!firstName.trim() || !lastName.trim() || !email.trim() || !phone.trim()) {
       toast({
         title: "Datos requeridos",
-        description: "Por favor completa nombre, apellido y teléfono.",
+        description: "Por favor completa nombre, apellido, email y teléfono.",
+        variant: "destructive",
+      });
+      return false;
+    }
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(email)) {
+      toast({
+        title: "Email inválido",
+        description: "Por favor ingresa un email válido.",
         variant: "destructive",
       });
       return false;
@@ -184,7 +196,7 @@ const Checkout = () => {
       // Create order in database with cart items
       const orderData = {
         customer_name: `${customerData.firstName} ${customerData.lastName}`,
-        customer_email: `${customerData.firstName.toLowerCase()}.${customerData.lastName.toLowerCase()}@placeholder.com`,
+        customer_email: customerData.email,
         customer_phone: customerData.phone || '',
         customer_address: customerAddress || '',
         product_id: cartItems[0]?.id, // Keep for backward compatibility
@@ -326,6 +338,18 @@ const Checkout = () => {
                     onChange={(e) => handleInputChange('lastName', e.target.value)}
                     placeholder="Tu apellido"
                     className="mt-2"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="email">Email *</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={customerData.email}
+                    onChange={(e) => handleInputChange('email', e.target.value)}
+                    placeholder="tu@email.com"
+                    className="mt-2"
+                    required
                   />
                 </div>
                 <div className="md:col-span-2">
