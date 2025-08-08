@@ -188,6 +188,9 @@ const Checkout = () => {
     try {
       const orderReference = `ORDER-${Date.now()}`;
       
+      // Store reference in localStorage for fallback
+      localStorage.setItem('currentOrderReference', orderReference);
+      
       // Prepare customer address for delivery
       const customerAddress = deliveryType === 'delivery' 
         ? customerData.detailedAddress

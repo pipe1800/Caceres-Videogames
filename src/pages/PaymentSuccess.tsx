@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useLocation } from 'react-router-dom';
 import { CheckCircle, XCircle, Loader2, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
@@ -7,53 +7,126 @@ import { supabase } from '@/integrations/supabase/client';
 const PaymentSuccess = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const location = useLocation();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
   const [orderDetails, setOrderDetails] = useState<any>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [retryCount, setRetryCount] = useState(0);
-  const maxRetries = 10; // Maximum number of retries
-  const retryDelay = 2000; // 2 seconds between retries
+  const maxRetries = 10;
+  const retryDelay = 2000;
 
   useEffect(() => {
+    // Log all URL parameters to understand what WOMPI sends
+    console.log('Full URL:', window.location.href);
+    console.log('Search params:', window.location.search);
+    console.log('All search params:', Object.fromEntries(searchParams.entries()));
+    
     checkPaymentStatus();
   }, [searchParams]);
 
   const checkPaymentStatus = async () => {
     try {
-      // WOMPI sends the transaction ID and reference in the URL parameters
-      const transactionId = searchParams.get('id');
-      const reference = searchParams.get('reference');
+      // Try different parameter names that WOMPI might use
+      const transactionId = searchParams.get('id') || 
+                           searchParams.get('transaction_id') || 
+                           searchParams.get('transactionId');
       
-      console.log('Payment success page - Transaction ID:', transactionId);
-      console.log('Payment success page - Reference:', reference);
+      const reference = searchParams.get('reference') || 
+                       searchParams.get('ref') || 
+                       searchParams.get('payment_reference') ||
+                       searchParams.get('orderReference');
       
-      if (!transactionId && !reference) {
-        setErrorMessage('No se encontró información de la transacción');
+      // Also check for wompi specific parameters
+      const wompiId = searchParams.get('wompi_id');
+      const wompiReference = searchParams.get('wompi_reference');
+      
+      console.log('Extracted parameters:', {
+        transactionId,
+        reference,
+        wompiId,
+        wompiReference,
+        allParams: Object.fromEntries(searchParams.entries())
+      });
+      
+      // Try to get the reference from localStorage as a fallback
+      const storedReference = localStorage.getItem('currentOrderReference');
+      console.log('Stored reference from localStorage:', storedReference);
+      
+      const finalReference = reference || wompiReference || storedReference;
+      
+      if (!transactionId && !finalReference) {
+        // If we have no parameters, try to find the most recent order for this session
+        const { data: recentOrder, error: recentOrderError } = await supabase
+          .from('orders')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+        
+        if (recentOrder && !recentOrderError) {
+          console.log('Found recent order:', recentOrder);
+          
+          // Check if this order was created recently (within last 5 minutes)
+          const orderTime = new Date(recentOrder.created_at).getTime();
+          const now = new Date().getTime();
+          const fiveMinutes = 5 * 60 * 1000;
+          
+          if (now - orderTime < fiveMinutes) {
+            setOrderDetails(recentOrder);
+            
+            // Check payment status
+            if (recentOrder.payment_status === 'completed') {
+              setStatus('success');
+              localStorage.removeItem('currentOrderReference');
+              return;
+            } else if (recentOrder.payment_status === 'failed') {
+              setErrorMessage('El pago fue rechazado. Por favor, intenta nuevamente.');
+              setStatus('error');
+              return;
+            }
+            
+            // If still pending/processing, retry
+            if (retryCount < maxRetries) {
+              setRetryCount(prev => prev + 1);
+              setTimeout(() => checkPaymentStatus(), retryDelay);
+              return;
+            }
+          }
+        }
+        
+        setErrorMessage('No se encontró información de la transacción. Si realizaste un pago, por favor contacta soporte.');
         setStatus('error');
         return;
       }
 
-      // Try to find the order by reference or transaction ID using the correct schema fields
-      let { data: orders, error: orderError } = await supabase
-        .from('orders')
-        .select('*')
-        .or(reference ? `wompi_reference.eq.${reference}` : `wompi_transaction_id.eq.${transactionId}`)
-        .single();
+      // Try to find the order using any available reference
+      let orderQuery = supabase.from('orders').select('*');
+      
+      if (finalReference) {
+        orderQuery = orderQuery.or(`wompi_reference.eq.${finalReference}`);
+      }
+      
+      if (transactionId) {
+        if (finalReference) {
+          orderQuery = orderQuery.or(`wompi_transaction_id.eq.${transactionId}`);
+        } else {
+          orderQuery = orderQuery.eq('wompi_transaction_id', transactionId);
+        }
+      }
+
+      const { data: orders, error: orderError } = await orderQuery.single();
 
       if (orderError || !orders) {
-        console.log('Order not found, retrying...', { retryCount, maxRetries, reference, transactionId });
+        console.log('Order not found, retrying...', { retryCount, maxRetries });
         
-        // If order not found and we haven't exceeded max retries, try again
         if (retryCount < maxRetries) {
           setRetryCount(prev => prev + 1);
-          setTimeout(() => {
-            checkPaymentStatus();
-          }, retryDelay);
+          setTimeout(() => checkPaymentStatus(), retryDelay);
           return;
         }
         
         console.error('Order lookup error:', orderError);
-        setErrorMessage('No se encontró la orden asociada a esta transacción. Por favor, contacta soporte.');
+        setErrorMessage('No se encontró la orden asociada a esta transacción. Por favor, verifica tu email para confirmación o contacta soporte.');
         setStatus('error');
         return;
       }
@@ -61,80 +134,35 @@ const PaymentSuccess = () => {
       console.log('Order found:', orders);
       setOrderDetails(orders);
 
-      // Check if payment is already confirmed
+      // Check payment status
       if (orders.payment_status === 'completed') {
         setStatus('success');
+        localStorage.removeItem('currentOrderReference');
         return;
       }
 
-      // If we have a transaction ID, let's check the payment status with WOMPI
-      if (transactionId && (orders.payment_status === 'pending' || orders.payment_status === 'processing')) {
-        console.log('Checking payment status with WOMPI...');
-        
-        try {
-          // Call the edge function to check payment status
-          const { data: paymentCheck, error: paymentError } = await supabase.functions.invoke('check-payment-status', {
-            body: { transactionId }
-          });
-
-          if (paymentError) {
-            console.error('Error checking payment with WOMPI:', paymentError);
-          } else if (paymentCheck && paymentCheck.data) {
-            const wompiStatus = paymentCheck.data.status;
-            console.log('WOMPI payment status:', wompiStatus);
-            
-            // Update order status based on WOMPI response
-            if (wompiStatus === 'APPROVED') {
-              const { error: updateError } = await supabase
-                .from('orders')
-                .update({
-                  payment_status: 'completed',
-                  status: 'completed',
-                  wompi_transaction_id: paymentCheck.data.id,
-                  updated_at: new Date().toISOString()
-                })
-                .eq('id', orders.id);
-                
-              if (!updateError) {
-                setOrderDetails({ ...orders, payment_status: 'completed', status: 'completed' });
-                setStatus('success');
-                return;
-              }
-            } else if (wompiStatus === 'DECLINED' || wompiStatus === 'VOIDED') {
-              setErrorMessage('El pago fue rechazado por el procesador. Por favor, intenta nuevamente.');
-              setStatus('error');
-              return;
-            }
-          }
-        } catch (error) {
-          console.error('Error calling check-payment-status:', error);
-        }
+      if (orders.payment_status === 'failed') {
+        setErrorMessage('El pago fue rechazado. Por favor, intenta nuevamente.');
+        setStatus('error');
+        return;
       }
 
-      // If payment status is still pending/processing after checking WOMPI, retry
+      // If still pending/processing, retry
       if (orders.payment_status === 'pending' || orders.payment_status === 'processing') {
+        console.log('Payment still processing, retrying...');
+        
         if (retryCount < maxRetries) {
           setRetryCount(prev => prev + 1);
-          setTimeout(() => {
-            checkPaymentStatus();
-          }, retryDelay);
+          setTimeout(() => checkPaymentStatus(), retryDelay);
           return;
         }
         
-        // After max retries, show a message that payment is being processed
         setErrorMessage('Tu pago está siendo procesado. Recibirás una confirmación por email en breve.');
         setStatus('error');
         return;
       }
 
-      // If payment was declined or failed
-      if (orders.payment_status === 'failed' || orders.payment_status === 'refunded') {
-        setErrorMessage('El pago no pudo ser procesado. Por favor, intenta nuevamente.');
-        setStatus('error');
-        return;
-      }
-
-      // Default case - payment successful
+      // Default to success if we have an order
       setStatus('success');
 
     } catch (error) {
@@ -197,7 +225,7 @@ const PaymentSuccess = () => {
           <CheckCircle className="w-16 h-16 text-[#3fdb70] mb-4" />
           <h2 className="text-2xl font-bold text-[#091024] mb-2">¡Pago Exitoso!</h2>
           <p className="text-gray-600 mb-6">
-            Tu orden #{orderDetails?.id || 'XXXXX'} ha sido confirmada. Recibirás un email con los detalles.
+            Tu orden #{orderDetails?.id?.slice(0, 8) || 'XXXXX'} ha sido confirmada. Recibirás un email con los detalles.
           </p>
           
           {orderDetails && (
@@ -205,6 +233,7 @@ const PaymentSuccess = () => {
               <h3 className="font-semibold text-[#091024] mb-2">Detalles de la orden:</h3>
               <div className="space-y-1 text-sm">
                 <p><span className="text-gray-600">Cliente:</span> {orderDetails.customer_name}</p>
+                <p><span className="text-gray-600">Email:</span> {orderDetails.customer_email}</p>
                 <p><span className="text-gray-600">Total:</span> ${orderDetails.total_amount?.toFixed(2)}</p>
                 <p><span className="text-gray-600">Estado:</span> Confirmado</p>
               </div>
