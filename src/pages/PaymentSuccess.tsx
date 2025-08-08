@@ -20,7 +20,7 @@ const PaymentSuccess = () => {
 
   const checkPaymentStatus = async () => {
     try {
-      // WOMPI sends the transaction ID in the URL parameters
+      // WOMPI sends the transaction ID and reference in the URL parameters
       const transactionId = searchParams.get('id');
       const reference = searchParams.get('reference');
       
@@ -33,21 +33,15 @@ const PaymentSuccess = () => {
         return;
       }
 
-      // First, try to find the order by reference or transaction ID
-      let query = supabase
+      // Try to find the order by reference or transaction ID using the correct schema fields
+      let { data: orders, error: orderError } = await supabase
         .from('orders')
-        .select('*');
-      
-      if (reference) {
-        query = query.or(`payment_reference.eq.${reference},wompi_reference.eq.${reference}`);
-      } else if (transactionId) {
-        query = query.eq('wompi_transaction_id', transactionId);
-      }
-
-      const { data: orders, error: orderError } = await query.single();
+        .select('*')
+        .or(reference ? `wompi_reference.eq.${reference}` : `wompi_transaction_id.eq.${transactionId}`)
+        .single();
 
       if (orderError || !orders) {
-        console.log('Order not found, retrying...', { retryCount, maxRetries });
+        console.log('Order not found, retrying...', { retryCount, maxRetries, reference, transactionId });
         
         // If order not found and we haven't exceeded max retries, try again
         if (retryCount < maxRetries) {
@@ -68,19 +62,57 @@ const PaymentSuccess = () => {
       setOrderDetails(orders);
 
       // Check if payment is already confirmed
-      if (orders.payment_status === 'approved' || orders.payment_status === 'APPROVED') {
+      if (orders.payment_status === 'completed') {
         setStatus('success');
         return;
       }
 
-      // If payment status is still pending/processing, we might need to wait for webhook
+      // If we have a transaction ID, let's check the payment status with WOMPI
+      if (transactionId && (orders.payment_status === 'pending' || orders.payment_status === 'processing')) {
+        console.log('Checking payment status with WOMPI...');
+        
+        try {
+          // Call the edge function to check payment status
+          const { data: paymentCheck, error: paymentError } = await supabase.functions.invoke('check-payment-status', {
+            body: { transactionId }
+          });
+
+          if (paymentError) {
+            console.error('Error checking payment with WOMPI:', paymentError);
+          } else if (paymentCheck && paymentCheck.data) {
+            const wompiStatus = paymentCheck.data.status;
+            console.log('WOMPI payment status:', wompiStatus);
+            
+            // Update order status based on WOMPI response
+            if (wompiStatus === 'APPROVED') {
+              const { error: updateError } = await supabase
+                .from('orders')
+                .update({
+                  payment_status: 'completed',
+                  status: 'completed',
+                  wompi_transaction_id: paymentCheck.data.id,
+                  updated_at: new Date().toISOString()
+                })
+                .eq('id', orders.id);
+                
+              if (!updateError) {
+                setOrderDetails({ ...orders, payment_status: 'completed', status: 'completed' });
+                setStatus('success');
+                return;
+              }
+            } else if (wompiStatus === 'DECLINED' || wompiStatus === 'VOIDED') {
+              setErrorMessage('El pago fue rechazado por el procesador. Por favor, intenta nuevamente.');
+              setStatus('error');
+              return;
+            }
+          }
+        } catch (error) {
+          console.error('Error calling check-payment-status:', error);
+        }
+      }
+
+      // If payment status is still pending/processing after checking WOMPI, retry
       if (orders.payment_status === 'pending' || orders.payment_status === 'processing') {
-        console.log('Payment still processing, checking with WOMPI directly...');
-        
-        // Optionally, you could make a direct call to WOMPI API to check transaction status
-        // This would require creating another edge function to securely check transaction status
-        
-        // For now, let's retry a few times
         if (retryCount < maxRetries) {
           setRetryCount(prev => prev + 1);
           setTimeout(() => {
@@ -96,9 +128,8 @@ const PaymentSuccess = () => {
       }
 
       // If payment was declined or failed
-      if (orders.payment_status === 'declined' || orders.payment_status === 'DECLINED' || 
-          orders.payment_status === 'failed' || orders.payment_status === 'VOIDED') {
-        setErrorMessage('El pago fue rechazado. Por favor, intenta nuevamente.');
+      if (orders.payment_status === 'failed' || orders.payment_status === 'refunded') {
+        setErrorMessage('El pago no pudo ser procesado. Por favor, intenta nuevamente.');
         setStatus('error');
         return;
       }

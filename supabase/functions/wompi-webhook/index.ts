@@ -36,11 +36,11 @@ serve(async (req) => {
       throw new Error('Invalid webhook data: missing transaction reference')
     }
 
-    // Find the order by payment reference
+    // Find the order by wompi reference (using the correct field from schema)
     const { data: orders, error: orderError } = await supabase
       .from('orders')
       .select('*')
-      .eq('payment_reference', transactionData.reference)
+      .eq('wompi_reference', transactionData.reference)
       .single()
 
     if (orderError || !orders) {
@@ -49,10 +49,19 @@ serve(async (req) => {
     }
 
     // Update the order payment status
+    let paymentStatus = 'pending';
+    if (transactionData.status === 'APPROVED') {
+      paymentStatus = 'completed';
+    } else if (transactionData.status === 'DECLINED' || transactionData.status === 'VOIDED') {
+      paymentStatus = 'failed';
+    } else if (transactionData.status === 'PENDING') {
+      paymentStatus = 'processing';
+    }
+
     const { error: orderUpdateError } = await supabase
       .from('orders')
       .update({
-        payment_status: transactionData.status.toLowerCase(),
+        payment_status: paymentStatus,
         wompi_transaction_id: transactionData.id,
         updated_at: new Date().toISOString()
       })
@@ -63,14 +72,14 @@ serve(async (req) => {
       throw orderUpdateError
     }
 
-    // If payment is approved, update order status to confirmed
+    // If payment is approved, update order status to completed
     // This will trigger stock reduction for card payments
     if (transactionData.status === 'APPROVED') {
       const { error: statusUpdateError } = await supabase
         .from('orders')
         .update({
-          status: 'confirmed',
-          payment_status: 'approved',
+          status: 'completed',
+          payment_status: 'completed',
           updated_at: new Date().toISOString()
         })
         .eq('id', orders.id)
@@ -87,21 +96,27 @@ serve(async (req) => {
       // - Trigger fulfillment process
     }
 
-    // Update or create payment record
+    // Update or create payment record using correct schema fields
+    const paymentStatusForPaymentsTable = transactionData.status === 'APPROVED' ? 'approved' : 
+                                         transactionData.status === 'DECLINED' ? 'declined' :
+                                         transactionData.status === 'VOIDED' ? 'voided' :
+                                         transactionData.status === 'PENDING' ? 'processing' : 'pending';
+
     const { error: paymentError } = await supabase
       .from('payments')
       .upsert({
         order_id: orders.id,
-        payment_method: 'card',
-        payment_status: transactionData.status.toLowerCase(),
-        payment_reference: transactionData.reference,
-        wompi_transaction_id: transactionData.id,
-        amount_cents: transactionData.amount_in_cents,
-        currency: transactionData.currency,
-        webhook_data: webhookData,
+        amount: transactionData.amount_in_cents / 100, // Convert cents to dollars
+        payment_method: 'credit-debit',
+        processor_transaction_id: transactionData.id,
+        processor_reference: transactionData.reference,
+        processor_response: webhookData,
+        status: paymentStatusForPaymentsTable,
+        currency: transactionData.currency || 'USD',
+        processor: 'wompi',
         updated_at: new Date().toISOString()
       }, {
-        onConflict: 'order_id,payment_reference'
+        onConflict: 'order_id'
       })
 
     if (paymentError) {
