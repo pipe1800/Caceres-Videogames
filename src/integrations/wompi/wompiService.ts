@@ -1,57 +1,73 @@
 import { WOMPI_CONFIG } from './config';
 import type { PaymentData, PaymentLinkResponse, PaymentStatusResponse } from './types';
+import { supabase } from '../supabase/supabaseClient';
 
 export class WompiService {
-  private getAuthHeaders() {
-    // WOMPI uses Bearer token authentication with the API secret
-    return {
-      'Authorization': `Bearer ${WOMPI_CONFIG.apiSecret}`,
-      'Content-Type': 'application/json',
-    };
-  }
-
   async createPaymentLink(paymentData: PaymentData): Promise<PaymentLinkResponse> {
     try {
-      const response = await fetch(`${WOMPI_CONFIG.apiUrl}/payment_links`, {
-        method: 'POST',
-        headers: this.getAuthHeaders(),
-        body: JSON.stringify({
-          amount_in_cents: Math.round(paymentData.amount * 100), // Convert to cents
+      console.log('Creating payment link with data:', paymentData);
+      
+      // Use Supabase Edge Function instead of direct API call
+      const { data, error } = await supabase.functions.invoke('create-payment-link', {
+        body: {
+          amount: paymentData.amount,
           currency: paymentData.currency,
           reference: paymentData.reference,
-          customer_email: paymentData.customerEmail,
-          name: `Pago de ${paymentData.customerName}`,
-          redirect_url: paymentData.redirectUrl,
-          single_use: true,
-        }),
+          customerEmail: paymentData.customerEmail,
+          customerName: paymentData.customerName,
+          redirectUrl: paymentData.redirectUrl,
+        },
       });
 
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error('WOMPI API Error:', errorData);
-        throw new Error(errorData.error?.message || 'Failed to create payment link');
+      if (error) {
+        console.error('Edge Function Error:', error);
+        console.error('Error details:', JSON.stringify(error, null, 2));
+        throw new Error(error.message || 'Failed to create payment link');
       }
 
-      return await response.json();
+      if (!data) {
+        throw new Error('No data returned from Edge Function');
+      }
+
+      console.log('Payment link created successfully:', data);
+      
+      // Transform WOMPI response to match expected interface
+      const normalizedResponse = {
+        data: {
+          id: data.idEnlace.toString(),
+          payment_link_url: data.urlEnlace,
+          checkout_url: data.urlEnlaceLargo || data.urlEnlace,
+          payment_link_id: data.idEnlace.toString(),
+          reference: paymentData.reference,
+          status: 'pending',
+          amount_in_cents: paymentData.amount * 100,
+          currency: paymentData.currency,
+          customer_email: paymentData.customerEmail,
+          customer_name: paymentData.customerName,
+          created_at: new Date().toISOString(),
+          expires_at: '', // WOMPI doesn't provide expiration in basic response
+        }
+      };
+      
+      return normalizedResponse;
     } catch (error) {
       console.error('Error creating WOMPI payment link:', error);
       throw error;
     }
   }
 
-  async checkPaymentStatus(paymentId: string): Promise<PaymentStatusResponse> {
+  async checkPaymentStatus(transactionId: string): Promise<PaymentStatusResponse> {
     try {
-      const response = await fetch(`${WOMPI_CONFIG.apiUrl}/transactions/${paymentId}`, {
-        headers: {
-          'Authorization': `Bearer ${WOMPI_CONFIG.appId}`, // Use app ID for status checks
-        },
+      // Use Supabase Edge Function instead of direct API call
+      const { data, error } = await supabase.functions.invoke('check-payment-status', {
+        body: { transactionId },
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to check payment status');
+      if (error) {
+        throw new Error(error.message || 'Failed to check payment status');
       }
 
-      return await response.json();
+      return data;
     } catch (error) {
       console.error('Error checking payment status:', error);
       throw error;
@@ -60,20 +76,11 @@ export class WompiService {
 
   async getPaymentByReference(reference: string): Promise<PaymentStatusResponse | null> {
     try {
-      const response = await fetch(`${WOMPI_CONFIG.apiUrl}/transactions?reference=${reference}`, {
-        headers: {
-          'Authorization': `Bearer ${WOMPI_CONFIG.appId}`,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(`Failed to get payment by reference: ${response.status} - ${errorData.message || response.statusText}`);
-      }
-
-      const result = await response.json();
-      return result.data && result.data.length > 0 ? { data: result.data[0] } : null;
+      // For now, we'll use the checkPaymentStatus method
+      // In a real implementation, you might want to create a separate Edge Function
+      // or modify the existing one to support reference-based queries
+      console.warn('getPaymentByReference not implemented with Edge Functions yet');
+      return null;
     } catch (error) {
       console.error('Error getting WOMPI payment by reference:', error);
       throw error;
