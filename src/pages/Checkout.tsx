@@ -203,6 +203,7 @@ const Checkout = () => {
         quantity: cartItems.reduce((total, item) => total + item.quantity, 0),
         total_amount: getTotalPrice(),
         payment_method: paymentMethod === 'card' ? 'credit-debit' : 'cash',
+        payment_reference: paymentMethod === 'card' ? orderReference : undefined,
         wompi_reference: paymentMethod === 'card' ? orderReference : undefined,
         cart_items: cartItems.map(item => ({
           id: item.id,
