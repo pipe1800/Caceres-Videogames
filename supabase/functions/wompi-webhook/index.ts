@@ -53,7 +53,7 @@ serve(async (req) => {
       .from('orders')
       .update({
         payment_status: transactionData.status.toLowerCase(),
-        payment_transaction_id: transactionData.id,
+        wompi_transaction_id: transactionData.id,
         updated_at: new Date().toISOString()
       })
       .eq('id', orders.id)
@@ -61,6 +61,30 @@ serve(async (req) => {
     if (orderUpdateError) {
       console.error('Error updating order:', orderUpdateError)
       throw orderUpdateError
+    }
+
+    // If payment is approved, update order status to confirmed
+    // This will trigger stock reduction for card payments
+    if (transactionData.status === 'APPROVED') {
+      const { error: statusUpdateError } = await supabase
+        .from('orders')
+        .update({
+          status: 'confirmed',
+          payment_status: 'approved',
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', orders.id)
+
+      if (statusUpdateError) {
+        console.error('Error updating order status:', statusUpdateError)
+      } else {
+        console.log(`Payment approved for order ${orders.id}, stock has been reduced via database trigger`)
+      }
+
+      // Here you could add additional logic like:
+      // - Send confirmation email to customer
+      // - Notify admin about new confirmed order
+      // - Trigger fulfillment process
     }
 
     // Update or create payment record
@@ -83,27 +107,6 @@ serve(async (req) => {
     if (paymentError) {
       console.error('Error updating payment:', paymentError)
       throw paymentError
-    }
-
-    // If payment is approved, update order status
-    if (transactionData.status === 'APPROVED') {
-      const { error: statusUpdateError } = await supabase
-        .from('orders')
-        .update({
-          status: 'confirmed',
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', orders.id)
-
-      if (statusUpdateError) {
-        console.error('Error updating order status:', statusUpdateError)
-      }
-
-      // Here you could add additional logic like:
-      // - Send confirmation email to customer
-      // - Notify admin about new confirmed order
-      // - Update inventory
-      // - Trigger fulfillment process
     }
 
     console.log(`Successfully processed webhook for order ${orders.id}`)

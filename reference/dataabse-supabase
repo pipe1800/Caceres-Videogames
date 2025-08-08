@@ -75,4 +75,3 @@ CREATE TABLE public.products (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT products_pkey PRIMARY KEY (id)
-);

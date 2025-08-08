@@ -181,17 +181,22 @@ const Checkout = () => {
         ? customerData.detailedAddress
         : undefined;
 
-      // Create order in database - using first cart item for now
+      // Create order in database with cart items
       const orderData = {
         customer_name: `${customerData.firstName} ${customerData.lastName}`,
         customer_email: `${customerData.firstName.toLowerCase()}.${customerData.lastName.toLowerCase()}@placeholder.com`,
         customer_phone: customerData.phone || '',
         customer_address: customerAddress || '',
-        product_id: cartItems[0]?.id, // Using first product for now
+        product_id: cartItems[0]?.id, // Keep for backward compatibility
         quantity: cartItems.reduce((total, item) => total + item.quantity, 0),
         total_amount: getTotalPrice(),
         payment_method: paymentMethod === 'card' ? 'credit-debit' : 'cash',
         wompi_reference: paymentMethod === 'card' ? orderReference : undefined,
+        cart_items: cartItems.map(item => ({
+          id: item.id,
+          quantity: item.quantity,
+          price: item.price
+        }))
       };
 
       const order = await orderService.createOrder(orderData);

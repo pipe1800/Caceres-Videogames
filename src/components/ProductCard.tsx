@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ShoppingCart, Star, Zap, Crown, Eye } from 'lucide-react';
+import { ShoppingCart, Star, Zap, Crown, Eye, X } from 'lucide-react';
 
 interface ProductCardProps {
   name: string;
@@ -14,6 +14,8 @@ interface ProductCardProps {
   onAddToCart?: () => void;
   productId?: string;
   viewMode?: 'grid' | 'list';
+  inStock?: boolean;
+  stockCount?: number;
 }
 
 const ProductCard = ({ 
@@ -26,7 +28,9 @@ const ProductCard = ({
   isOnSale,
   onAddToCart,
   productId,
-  viewMode = 'grid'
+  viewMode = 'grid',
+  inStock = true,
+  stockCount = 0
 }: ProductCardProps) => {
   const navigate = useNavigate();
 
@@ -106,12 +110,35 @@ const ProductCard = ({
             </button>
             <button
               onClick={onAddToCart}
-              className="bg-gradient-to-r from-[#3bc8da] to-[#3fdb70] hover:from-[#3fdb70] hover:to-[#3bc8da] text-white py-3 px-6 rounded-xl font-bold transition-all duration-300 flex items-center gap-2 transform hover:scale-105 shadow-lg"
+              disabled={!inStock || stockCount === 0}
+              className={`${
+                !inStock || stockCount === 0 
+                  ? 'bg-gray-400 cursor-not-allowed' 
+                  : 'bg-gradient-to-r from-[#3bc8da] to-[#3fdb70] hover:from-[#3fdb70] hover:to-[#3bc8da]'
+              } text-white py-3 px-6 rounded-xl font-bold transition-all duration-300 flex items-center gap-2 ${
+                inStock && stockCount > 0 ? 'transform hover:scale-105' : ''
+              } shadow-lg`}
             >
-              <ShoppingCart className="w-5 h-5" />
-              <span>Agregar</span>
+              {!inStock || stockCount === 0 ? (
+                <>
+                  <X className="w-5 h-5" />
+                  <span>Agotado</span>
+                </>
+              ) : (
+                <>
+                  <ShoppingCart className="w-5 h-5" />
+                  <span>Agregar</span>
+                </>
+              )}
             </button>
           </div>
+          
+          {/* Stock indicator for list view */}
+          {stockCount !== undefined && stockCount > 0 && stockCount <= 5 && inStock && (
+            <p className="text-xs text-orange-500 font-semibold ml-4">
+              ¡Solo quedan {stockCount} unidades!
+            </p>
+          )}
         </div>
       </div>
     );
@@ -203,11 +230,34 @@ const ProductCard = ({
         {/* Enhanced Add to Cart Button */}
         <button
           onClick={onAddToCart}
-          className="w-full bg-gradient-to-r from-[#3bc8da] to-[#3fdb70] hover:from-[#3fdb70] hover:to-[#3bc8da] text-white py-3 px-4 rounded-xl font-bold transition-all duration-300 flex items-center justify-center gap-2 transform hover:scale-105 shadow-lg group-hover:shadow-xl"
+          disabled={!inStock || stockCount === 0}
+          className={`w-full ${
+            !inStock || stockCount === 0 
+              ? 'bg-gray-400 cursor-not-allowed' 
+              : 'bg-gradient-to-r from-[#3bc8da] to-[#3fdb70] hover:from-[#3fdb70] hover:to-[#3bc8da]'
+          } text-white py-3 px-4 rounded-xl font-bold transition-all duration-300 flex items-center justify-center gap-2 transform ${
+            inStock && stockCount > 0 ? 'hover:scale-105' : ''
+          } shadow-lg group-hover:shadow-xl`}
         >
-          <ShoppingCart className="w-5 h-5" />
-          <span>Agregar al Carrito</span>
+          {!inStock || stockCount === 0 ? (
+            <>
+              <X className="w-5 h-5" />
+              <span>Agotado</span>
+            </>
+          ) : (
+            <>
+              <ShoppingCart className="w-5 h-5" />
+              <span>Agregar al Carrito</span>
+            </>
+          )}
         </button>
+        
+        {/* Stock indicator */}
+        {stockCount !== undefined && stockCount > 0 && stockCount <= 5 && inStock && (
+          <p className="text-xs text-orange-500 mt-2 text-center font-semibold">
+            ¡Solo quedan {stockCount} unidades!
+          </p>
+        )}
       </div>
 
       {/* Gaming Corner Accent */}

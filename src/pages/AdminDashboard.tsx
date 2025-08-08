@@ -3,6 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAdmin } from '@/hooks/useAdmin';
 import { supabase } from '@/integrations/supabase/client';
+import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
@@ -46,6 +47,7 @@ interface Product {
 const AdminDashboard = () => {
   const { admin, logout } = useAdmin();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [orders, setOrders] = useState<Order[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -95,14 +97,39 @@ const AdminDashboard = () => {
 
   const updateOrderStatus = async (orderId: string, status: string) => {
     try {
-      await supabase
+      const { error } = await supabase
         .from('orders')
-        .update({ status, updated_at: new Date().toISOString() })
+        .update({ 
+          status, 
+          updated_at: new Date().toISOString() 
+        })
         .eq('id', orderId);
+      
+      if (error) {
+        console.error('Error updating order:', error);
+        toast({
+          title: "Error",
+          description: "No se pudo actualizar el estado de la orden",
+          variant: "destructive"
+        });
+        return;
+      }
+      
+      toast({
+        title: "Orden actualizada",
+        description: status === 'completed' 
+          ? "La orden ha sido marcada como completada y el stock ha sido actualizado" 
+          : "El estado de la orden ha sido actualizado",
+      });
       
       fetchData(); // Refresh data
     } catch (error) {
       console.error('Error updating order:', error);
+      toast({
+        title: "Error",
+        description: "Error al actualizar la orden",
+        variant: "destructive"
+      });
     }
   };
 

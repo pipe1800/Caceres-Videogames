@@ -19,6 +19,8 @@ interface Product {
   console: string;
   is_new: boolean;
   is_on_sale: boolean;
+  in_stock: boolean;
+  stock_count: number;
 }
 
 const Index = () => {
@@ -40,20 +42,20 @@ const Index = () => {
 
   const fetchProducts = async () => {
     try {
-      // Fetch new products
+      // Fetch new products (including out of stock)
       const { data: newData } = await supabase
         .from('products')
         .select('*')
         .eq('is_new', true)
-        .eq('in_stock', true)
+        // Remove .eq('in_stock', true) to show all products
         .limit(4);
 
-      // Fetch sale products
+      // Fetch sale products (including out of stock)
       const { data: saleData } = await supabase
         .from('products')
         .select('*')
         .eq('is_on_sale', true)
-        .eq('in_stock', true)
+        // Remove .eq('in_stock', true) to show all products
         .limit(4);
 
       setNewProducts(newData || []);
@@ -78,7 +80,15 @@ const Index = () => {
     const allProducts = [...newProducts, ...saleProducts];
     const product = allProducts.find(p => p.id === productId);
     
-    setCartItemsCount(prev => prev + 1);
+    // Check if product is in stock
+    if (!product?.in_stock || product?.stock_count === 0) {
+      toast({
+        title: "Producto agotado",
+        description: "Este producto está fuera de stock.",
+        variant: "destructive"
+      });
+      return;
+    }
     
     // Get existing cart items
     const existingCart = localStorage.getItem('cartItems');
@@ -86,6 +96,19 @@ const Index = () => {
     
     // Check if product already exists in cart
     const existingItemIndex = cartItems.findIndex((item: any) => item.id === productId);
+    
+    // Check if adding one more would exceed stock
+    const currentQuantityInCart = existingItemIndex > -1 ? cartItems[existingItemIndex].quantity : 0;
+    if (currentQuantityInCart >= product.stock_count) {
+      toast({
+        title: "Stock insuficiente",
+        description: `Solo hay ${product.stock_count} unidades disponibles.`,
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    setCartItemsCount(prev => prev + 1);
     
     if (existingItemIndex > -1) {
       // Increase quantity
@@ -123,7 +146,9 @@ const Index = () => {
       image: product.image_urls[0] || 'https://images.unsplash.com/photo-1605810230434-7631ac76ec81?w=400&h=300&fit=crop',
       console: product.console,
       isNew: product.is_new,
-      isOnSale: product.is_on_sale
+      isOnSale: product.is_on_sale,
+      inStock: product.in_stock,
+      stockCount: product.stock_count
     }));
   };
 

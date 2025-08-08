@@ -48,8 +48,8 @@ const Products = () => {
     try {
       let query = supabase
         .from('products')
-        .select('*')
-        .eq('in_stock', true);
+        .select('*');
+      // Remove the .eq('in_stock', true) filter to show all products
 
       if (categoryFilter) {
         query = query.eq('category', categoryFilter);
@@ -84,7 +84,15 @@ const Products = () => {
     // Find the product to get its details for the toast
     const product = products.find(p => p.id === productId);
     
-    setCartItemsCount(prev => prev + 1);
+    // Check if product is in stock
+    if (!product?.in_stock || product?.stock_count === 0) {
+      toast({
+        title: "Producto agotado",
+        description: "Este producto está fuera de stock.",
+        variant: "destructive"
+      });
+      return;
+    }
     
     // Get existing cart items
     const existingCart = localStorage.getItem('cartItems');
@@ -92,6 +100,19 @@ const Products = () => {
     
     // Check if product already exists in cart
     const existingItemIndex = cartItems.findIndex((item: any) => item.id === productId);
+    
+    // Check if adding one more would exceed stock
+    const currentQuantityInCart = existingItemIndex > -1 ? cartItems[existingItemIndex].quantity : 0;
+    if (currentQuantityInCart >= product.stock_count) {
+      toast({
+        title: "Stock insuficiente",
+        description: `Solo hay ${product.stock_count} unidades disponibles.`,
+        variant: "destructive"
+      });
+      return;
+    }
+    
+    setCartItemsCount(prev => prev + 1);
     
     if (existingItemIndex > -1) {
       // Increase quantity
@@ -164,6 +185,8 @@ const Products = () => {
                 console={product.console}
                 isNew={product.is_new}
                 isOnSale={product.is_on_sale}
+                inStock={product.in_stock}
+                stockCount={product.stock_count}
                 onAddToCart={() => handleAddToCart(product.id)}
               />
             ))}

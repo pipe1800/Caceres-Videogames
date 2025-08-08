@@ -12,6 +12,8 @@ interface Product {
   console?: string;
   isNew?: boolean;
   isOnSale?: boolean;
+  inStock?: boolean;
+  stockCount?: number;
 }
 
 interface ProductSectionProps {
@@ -86,6 +88,8 @@ const ProductSection = ({ title, products, onAddToCart }: ProductSectionProps) =
                 console={product.console}
                 isNew={product.isNew}
                 isOnSale={product.isOnSale}
+                inStock={product.inStock}
+                stockCount={product.stockCount}
                 onAddToCart={() => onAddToCart?.(product.id)}
                 productId={product.id}
               />
