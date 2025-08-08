@@ -30,7 +30,14 @@ const Header = ({ cartItemsCount = 0, onCartClick }: HeaderProps) => {
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-1">
               <Phone className="w-4 h-4" />
-              <span>WhatsApp Business</span>
+              <a 
+                href="https://wa.me/50379866174" 
+                target="_blank" 
+                rel="noopener noreferrer"
+                className="hover:text-[#f3cb49] transition-colors"
+              >
+                WhatsApp Business
+              </a>
             </div>
             <div className="flex items-center gap-1">
               <MapPin className="w-4 h-4" />

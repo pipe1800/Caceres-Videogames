@@ -37,11 +37,25 @@ const CompanyInfo = () => {
               <div className="space-y-2">
                 <div className="flex items-center gap-2">
                   <MessageCircle className="w-4 h-4 text-[#3fdb70]" />
-                  <span>WhatsApp Business</span>
+                  <a 
+                    href="https://wa.me/50379866174" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-[#091024] hover:text-[#3fdb70] transition-colors"
+                  >
+                    WhatsApp Business
+                  </a>
                 </div>
                 <div className="flex items-center gap-2">
                   <Facebook className="w-4 h-4 text-[#3bc8da]" />
-                  <span>Facebook Marketplace</span>
+                  <a 
+                    href="https://www.facebook.com/share/1L2HRXV8s1/" 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="text-[#091024] hover:text-[#3bc8da] transition-colors"
+                  >
+                    Facebook Marketplace
+                  </a>
                 </div>
               </div>
             </div>

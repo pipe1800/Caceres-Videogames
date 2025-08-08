@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { ChevronDown, Gamepad2, Smartphone, Home } from 'lucide-react';
 
 const categories = [
@@ -53,6 +53,28 @@ interface NavigationProps {
 
 const Navigation = ({ onCategorySelect }: NavigationProps) => {
   const [openDropdown, setOpenDropdown] = useState<string | null>(null);
+  const timeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const handleMouseEnter = (categoryName: string) => {
+    if (timeoutRef.current) {
+      clearTimeout(timeoutRef.current);
+    }
+    setOpenDropdown(categoryName);
+  };
+
+  const handleMouseLeave = () => {
+    timeoutRef.current = setTimeout(() => {
+      setOpenDropdown(null);
+    }, 150); // 150ms delay before closing
+  };
+
+  useEffect(() => {
+    return () => {
+      if (timeoutRef.current) {
+        clearTimeout(timeoutRef.current);
+      }
+    };
+  }, []);
 
   const handleHomeClick = () => {
     window.location.href = '/';
@@ -78,8 +100,8 @@ const Navigation = ({ onCategorySelect }: NavigationProps) => {
               <li key={category.name} className="relative group">
                 <button
                   className="flex items-center gap-2 px-4 py-2 text-[#091024] hover:text-[#d93d34] font-medium transition-colors rounded-lg hover:bg-gray-50"
-                  onMouseEnter={() => setOpenDropdown(category.name)}
-                  onMouseLeave={() => setOpenDropdown(null)}
+                  onMouseEnter={() => handleMouseEnter(category.name)}
+                  onMouseLeave={handleMouseLeave}
                   onClick={() => onCategorySelect?.(category.name)}
                 >
                   {category.icon}
@@ -92,15 +114,18 @@ const Navigation = ({ onCategorySelect }: NavigationProps) => {
                 {/* Dropdown */}
                 {category.subcategories.length > 0 && openDropdown === category.name && (
                   <div 
-                    className="absolute top-full left-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-64"
-                    onMouseEnter={() => setOpenDropdown(category.name)}
-                    onMouseLeave={() => setOpenDropdown(null)}
+                    className="absolute top-full left-0 mt-0 bg-white border border-gray-200 rounded-lg shadow-lg z-50 min-w-64"
+                    onMouseEnter={() => handleMouseEnter(category.name)}
+                    onMouseLeave={handleMouseLeave}
                   >
                     {category.subcategories.map((subcategory) => (
                       <button
                         key={subcategory}
-                        className="block w-full text-left px-4 py-2 text-[#091024] hover:bg-[#3bc8da]/10 hover:text-[#d93d34] transition-colors first:rounded-t-lg last:rounded-b-lg"
-                        onClick={() => onCategorySelect?.(subcategory)}
+                        className="block w-full text-left px-4 py-3 text-[#091024] hover:bg-[#3bc8da]/10 hover:text-[#d93d34] transition-colors first:rounded-t-lg last:rounded-b-lg"
+                        onClick={() => {
+                          onCategorySelect?.(subcategory);
+                          setOpenDropdown(null);
+                        }}
                       >
                         {subcategory}
                       </button>

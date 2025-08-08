@@ -6,6 +6,7 @@ import Header from '@/components/Header';
 import Navigation from '@/components/Navigation';
 import ProductCard from '@/components/ProductCard';
 import Footer from '@/components/Footer';
+import { toast } from "@/hooks/use-toast";
 
 interface Product {
   id: string;
@@ -35,6 +36,12 @@ const Products = () => {
 
   useEffect(() => {
     fetchProducts();
+    
+    // Load cart count from localStorage
+    const savedCartCount = localStorage.getItem('cartItemsCount');
+    if (savedCartCount) {
+      setCartItemsCount(parseInt(savedCartCount));
+    }
   }, [categoryFilter]);
 
   const fetchProducts = async () => {
@@ -74,7 +81,41 @@ const Products = () => {
   };
 
   const handleAddToCart = (productId: string) => {
+    // Find the product to get its details for the toast
+    const product = products.find(p => p.id === productId);
+    
     setCartItemsCount(prev => prev + 1);
+    
+    // Get existing cart items
+    const existingCart = localStorage.getItem('cartItems');
+    const cartItems = existingCart ? JSON.parse(existingCart) : [];
+    
+    // Check if product already exists in cart
+    const existingItemIndex = cartItems.findIndex((item: any) => item.id === productId);
+    
+    if (existingItemIndex > -1) {
+      // Increase quantity
+      cartItems[existingItemIndex].quantity += 1;
+    } else {
+      // Add new item
+      cartItems.push({
+        id: productId,
+        name: product?.name || 'Producto',
+        price: product?.price || 0,
+        image: product?.image_urls[0] || '',
+        console: product?.console || '',
+        quantity: 1
+      });
+    }
+    
+    localStorage.setItem('cartItems', JSON.stringify(cartItems));
+    localStorage.setItem('cartItemsCount', (cartItemsCount + 1).toString());
+    
+    toast({
+      title: "Producto agregado al carrito",
+      description: `${product?.name || 'El producto'} ha sido agregado a tu carrito.`,
+    });
+    
     console.log('Added product to cart:', productId);
   };
 

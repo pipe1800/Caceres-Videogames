@@ -17,10 +17,10 @@ const Footer = () => {
               Productos originales y los mejores precios.
             </p>
             <div className="flex gap-4">
-              <a href="#" className="text-[#3fdb70] hover:text-[#3fdb70]/80">
+              <a href="https://wa.me/50379866174" target="_blank" rel="noopener noreferrer" className="text-[#3fdb70] hover:text-[#3fdb70]/80">
                 <MessageCircle className="w-6 h-6" />
               </a>
-              <a href="#" className="text-[#3bc8da] hover:text-[#3bc8da]/80">
+              <a href="https://www.facebook.com/share/1L2HRXV8s1/" target="_blank" rel="noopener noreferrer" className="text-[#3bc8da] hover:text-[#3bc8da]/80">
                 <Facebook className="w-6 h-6" />
               </a>
             </div>
@@ -44,7 +44,14 @@ const Footer = () => {
             <div className="space-y-2 text-gray-300">
               <div className="flex items-center gap-2">
                 <MessageCircle className="w-4 h-4" />
-                <span>WhatsApp Business</span>
+                <a 
+                  href="https://wa.me/50379866174" 
+                  target="_blank" 
+                  rel="noopener noreferrer"
+                  className="hover:text-[#3fdb70] transition-colors"
+                >
+                  WhatsApp Business
+                </a>
               </div>
               <div className="flex items-center gap-2">
                 <MapPin className="w-4 h-4" />

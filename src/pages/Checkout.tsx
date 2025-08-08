@@ -13,6 +13,8 @@ import { Textarea } from '@/components/ui/textarea';
 import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { elSalvadorDepartments, Department, Municipality } from '@/data/elSalvadorData';
+import { wompiService } from '@/integrations/wompi';
+import { orderService } from '@/integrations/supabase/orderService';
 
 interface CartItem {
   id: string;
@@ -55,6 +57,7 @@ const Checkout = () => {
   const [selectedDepartment, setSelectedDepartment] = useState('');
   const [selectedMunicipality, setSelectedMunicipality] = useState('');
   const [availableMunicipalities, setAvailableMunicipalities] = useState<Municipality[]>([]);
+  const [isProcessingPayment, setIsProcessingPayment] = useState(false);
   const [customerData, setCustomerData] = useState({
     firstName: '',
     lastName: '',
@@ -165,34 +168,157 @@ const Checkout = () => {
     return true;
   };
 
-  const handlePlaceOrder = () => {
+  const handlePlaceOrder = async () => {
     if (!validateForm()) return;
 
-    // Get department and municipality names
-    const departmentName = elSalvadorDepartments.find(dept => dept.id === selectedDepartment)?.name || '';
-    const municipalityName = availableMunicipalities.find(muni => muni.id === selectedMunicipality)?.name || '';
+    setIsProcessingPayment(true);
 
-    // Here you would integrate with your backend to process the order
-    console.log('Order data:', {
-      items: cartItems,
-      deliveryType,
-      deliveryPoint: selectedDeliveryPoint,
-      department: departmentName,
-      municipality: municipalityName,
-      customerData,
-      paymentMethod,
-      total: getTotalPrice(),
-    });
+    try {
+      // Get department and municipality names
+      const departmentName = elSalvadorDepartments.find(dept => dept.id === selectedDepartment)?.name || '';
+      const municipalityName = availableMunicipalities.find(muni => muni.id === selectedMunicipality)?.name || '';
 
-    toast({
-      title: "¡Pedido realizado!",
-      description: "Tu pedido ha sido enviado correctamente. Te contactaremos pronto.",
-    });
+      const orderData = {
+        items: cartItems,
+        deliveryType,
+        deliveryPoint: selectedDeliveryPoint,
+        department: departmentName,
+        municipality: municipalityName,
+        customerData,
+        paymentMethod,
+        total: getTotalPrice(),
+      };
 
-    // Clear cart and redirect
-    localStorage.removeItem('cartItems');
-    localStorage.removeItem('cartItemsCount');
-    navigate('/');
+      // Generate a unique reference for the order
+      const reference = `ORDER-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
+      // Prepare order data for database
+      const dbOrderData = {
+        customer_name: `${customerData.firstName} ${customerData.lastName}`,
+        customer_email: `${customerData.firstName.toLowerCase()}.${customerData.lastName.toLowerCase()}@placeholder.com`,
+        customer_phone: customerData.phone,
+        customer_address: deliveryType === 'delivery' ? customerData.detailedAddress : undefined,
+        product_ids: cartItems.map(item => item.id),
+        quantities: cartItems.map(item => item.quantity),
+        total_amount: getTotalPrice(),
+        payment_method: paymentMethod,
+        payment_reference: reference,
+        delivery_type: deliveryType,
+        delivery_point: deliveryType === 'pickup' ? selectedDeliveryPoint : undefined,
+        delivery_department: deliveryType === 'delivery' ? departmentName : undefined,
+        delivery_municipality: deliveryType === 'delivery' ? municipalityName : undefined,
+        delivery_address: deliveryType === 'delivery' ? customerData.detailedAddress : undefined,
+        delivery_reference_point: deliveryType === 'delivery' ? customerData.referencePoint : undefined,
+        delivery_map_location: deliveryType === 'delivery' ? customerData.mapLocation : undefined,
+        status: paymentMethod === 'card' ? 'pending' : 'confirmed',
+      };
+
+      // If payment method is card (credit/debit), use WOMPI
+      if (paymentMethod === 'card') {
+        // Prepare shipping address for WOMPI
+        let shippingAddress;
+        if (deliveryType === 'delivery') {
+          shippingAddress = {
+            address: customerData.detailedAddress,
+            city: municipalityName,
+            region: departmentName,
+            country: 'SV', // El Salvador
+          };
+        }
+
+        const paymentData = {
+          amount: getTotalPrice(),
+          currency: 'USD',
+          reference: reference,
+          customerEmail: dbOrderData.customer_email,
+          customerName: dbOrderData.customer_name,
+          customerPhone: customerData.phone,
+          shippingAddress: shippingAddress,
+        };
+
+        toast({
+          title: "Procesando pago...",
+          description: "Creando orden y redirigiendo a la pasarela de pago segura.",
+        });
+
+        // Create the order in the database first
+        const { data: orderResult, error: orderError } = await orderService.createOrder(dbOrderData);
+        
+        if (orderError || !orderResult) {
+          throw new Error('No se pudo crear la orden en la base de datos');
+        }
+
+        // Create payment link with WOMPI
+        const paymentResponse = await wompiService.createPaymentLink(paymentData);
+        
+        if (paymentResponse.data && paymentResponse.data.payment_link_url) {
+          // Create payment record
+          await orderService.createPayment({
+            order_id: orderResult.id,
+            payment_method: 'card',
+            payment_reference: reference,
+            wompi_payment_link_id: paymentResponse.data.id,
+            amount_cents: Math.round(getTotalPrice() * 100),
+            currency: 'USD',
+            payment_data: paymentResponse.data,
+          });
+
+          // Store order data in localStorage for later processing
+          localStorage.setItem('pendingOrder', JSON.stringify({
+            ...orderData,
+            reference: reference,
+            paymentLinkId: paymentResponse.data.id,
+            orderId: orderResult.id,
+          }));
+
+          // Clear cart before redirecting
+          localStorage.removeItem('cartItems');
+          localStorage.removeItem('cartItemsCount');
+
+          // Redirect to WOMPI checkout
+          window.location.href = paymentResponse.data.payment_link_url;
+        } else {
+          throw new Error('No se pudo crear el enlace de pago');
+        }
+      } else {
+        // Cash payment - process normally and save to database
+        const { data: orderResult, error: orderError } = await orderService.createOrder(dbOrderData);
+        
+        if (orderError || !orderResult) {
+          throw new Error('No se pudo crear la orden en la base de datos');
+        }
+
+        // Create payment record for cash payment
+        await orderService.createPayment({
+          order_id: orderResult.id,
+          payment_method: 'cash',
+          payment_reference: reference,
+          amount_cents: Math.round(getTotalPrice() * 100),
+          currency: 'USD',
+        });
+
+        console.log('Order created successfully:', orderResult);
+
+        toast({
+          title: "¡Pedido realizado!",
+          description: "Tu pedido ha sido enviado correctamente. Te contactaremos pronto.",
+        });
+
+        // Clear cart and redirect
+        localStorage.removeItem('cartItems');
+        localStorage.removeItem('cartItemsCount');
+        navigate('/');
+      }
+    } catch (error) {
+      console.error('Error processing order:', error);
+      toast({
+        title: "Error en el pedido",
+        description: error instanceof Error ? error.message : "No se pudo procesar tu pedido. Por favor intenta nuevamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setIsProcessingPayment(false);
+    }
   };
 
   return (
@@ -463,9 +589,17 @@ const Checkout = () => {
 
               <Button
                 onClick={handlePlaceOrder}
-                className="w-full bg-gradient-to-r from-[#3bc8da] to-[#3fdb70] hover:from-[#3fdb70] hover:to-[#3bc8da] text-white py-4 px-6 rounded-xl font-bold text-lg transition-all duration-300 transform hover:scale-105 shadow-lg h-auto"
+                disabled={isProcessingPayment}
+                className="w-full bg-gradient-to-r from-[#3bc8da] to-[#3fdb70] hover:from-[#3fdb70] hover:to-[#3bc8da] text-white py-4 px-6 rounded-xl font-bold text-lg transition-all duration-300 transform hover:scale-105 shadow-lg h-auto disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
               >
-                Confirmar Pedido
+                {isProcessingPayment ? (
+                  <div className="flex items-center gap-2">
+                    <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white"></div>
+                    {paymentMethod === 'card' ? 'Procesando Pago...' : 'Creando Pedido...'}
+                  </div>
+                ) : (
+                  'Confirmar Pedido'
+                )}
               </Button>
 
               <p className="text-xs text-gray-500 mt-4 text-center">
