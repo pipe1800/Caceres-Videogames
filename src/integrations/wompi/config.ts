@@ -1,9 +1,12 @@
 export const WOMPI_CONFIG = {
-  appId: import.meta.env.VITE_WOMPI_APP_ID || 'dd599b63-81e6-48e3-9631-0ba9be8084ac',
-  apiSecret: import.meta.env.VITE_WOMPI_API_SECRET || 'ae36f414-c099-453b-8c20-5e6d714a2c14',
-  apiUrl: import.meta.env.VITE_WOMPI_API_URL || 'https://api.wompi.sv/v1',
-  // For testing/sandbox use: https://api-sandbox.wompi.sv/v1
+  appId: import.meta.env.VITE_WOMPI_APP_ID,
+  apiSecret: import.meta.env.VITE_WOMPI_API_SECRET,
+  apiUrl: import.meta.env.VITE_WOMPI_API_URL || 'https://api-sandbox.wompi.sv/v1',
 };
+
+if (!WOMPI_CONFIG.appId || !WOMPI_CONFIG.apiSecret) {
+  console.warn('WOMPI credentials not configured. Payment processing will not work.');
+}
 
 export const WOMPI_PAYMENT_STATUS = {
   PENDING: 'PENDING',

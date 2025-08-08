@@ -6,6 +6,7 @@ import Navigation from '@/components/Navigation';
 import Footer from '@/components/Footer';
 import { Button } from '@/components/ui/button';
 import { wompiService, WOMPI_PAYMENT_STATUS } from '@/integrations/wompi';
+import { orderService } from '@/integrations/supabase/orderService';
 import type { WompiPaymentStatus } from '@/integrations/wompi';
 
 const PaymentSuccess = () => {
@@ -37,6 +38,21 @@ const PaymentSuccess = () => {
         if (response && response.data) {
           setTransactionData(response.data);
           setPaymentStatus(response.data.status as WompiPaymentStatus);
+
+          // Update order status in database
+          if (reference) {
+            try {
+              const order = await orderService.getOrderByReference(reference);
+              if (order) {
+                await orderService.updateOrderPayment(order.id, {
+                  payment_status: response.data.status.toLowerCase(),
+                  wompi_transaction_id: response.data.id,
+                });
+              }
+            } catch (dbError) {
+              console.error('Error updating order status:', dbError);
+            }
+          }
         } else {
           setPaymentStatus(WOMPI_PAYMENT_STATUS.DECLINED);
         }

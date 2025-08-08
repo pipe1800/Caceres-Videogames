@@ -174,146 +174,91 @@ const Checkout = () => {
     setIsProcessingPayment(true);
 
     try {
-      // Get department and municipality names
-      const departmentName = elSalvadorDepartments.find(dept => dept.id === selectedDepartment)?.name || '';
-      const municipalityName = availableMunicipalities.find(muni => muni.id === selectedMunicipality)?.name || '';
+      const orderReference = `ORDER-${Date.now()}`;
+      
+      // Prepare customer address for delivery
+      const customerAddress = deliveryType === 'delivery' 
+        ? customerData.detailedAddress
+        : undefined;
 
+      // Create order in database - using first cart item for now
       const orderData = {
-        items: cartItems,
-        deliveryType,
-        deliveryPoint: selectedDeliveryPoint,
-        department: departmentName,
-        municipality: municipalityName,
-        customerData,
-        paymentMethod,
-        total: getTotalPrice(),
-      };
-
-      // Generate a unique reference for the order
-      const reference = `ORDER-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-
-      // Prepare order data for database
-      const dbOrderData = {
         customer_name: `${customerData.firstName} ${customerData.lastName}`,
         customer_email: `${customerData.firstName.toLowerCase()}.${customerData.lastName.toLowerCase()}@placeholder.com`,
-        customer_phone: customerData.phone,
-        customer_address: deliveryType === 'delivery' ? customerData.detailedAddress : undefined,
-        product_ids: cartItems.map(item => item.id),
-        quantities: cartItems.map(item => item.quantity),
+        customer_phone: customerData.phone || '',
+        customer_address: customerAddress || '',
+        product_id: cartItems[0]?.id, // Using first product for now
+        quantity: cartItems.reduce((total, item) => total + item.quantity, 0),
         total_amount: getTotalPrice(),
-        payment_method: paymentMethod,
-        payment_reference: reference,
-        delivery_type: deliveryType,
-        delivery_point: deliveryType === 'pickup' ? selectedDeliveryPoint : undefined,
-        delivery_department: deliveryType === 'delivery' ? departmentName : undefined,
-        delivery_municipality: deliveryType === 'delivery' ? municipalityName : undefined,
-        delivery_address: deliveryType === 'delivery' ? customerData.detailedAddress : undefined,
-        delivery_reference_point: deliveryType === 'delivery' ? customerData.referencePoint : undefined,
-        delivery_map_location: deliveryType === 'delivery' ? customerData.mapLocation : undefined,
-        status: paymentMethod === 'card' ? 'pending' : 'confirmed',
+        payment_method: paymentMethod === 'card' ? 'credit-debit' : 'cash',
+        wompi_reference: paymentMethod === 'card' ? orderReference : undefined,
       };
 
-      // If payment method is card (credit/debit), use WOMPI
-      if (paymentMethod === 'card') {
-        // Prepare shipping address for WOMPI
-        let shippingAddress;
-        if (deliveryType === 'delivery') {
-          shippingAddress = {
-            address: customerData.detailedAddress,
-            city: municipalityName,
-            region: departmentName,
-            country: 'SV', // El Salvador
-          };
-        }
+      const order = await orderService.createOrder(orderData);
 
+      if (paymentMethod === 'card') {
+        // Process WOMPI payment
         const paymentData = {
           amount: getTotalPrice(),
           currency: 'USD',
-          reference: reference,
-          customerEmail: dbOrderData.customer_email,
-          customerName: dbOrderData.customer_name,
-          customerPhone: customerData.phone,
-          shippingAddress: shippingAddress,
+          reference: orderReference,
+          customerEmail: orderData.customer_email,
+          customerName: orderData.customer_name,
+          customerPhone: customerData.phone || undefined,
+          redirectUrl: `${window.location.origin}/payment/success`,
         };
 
-        toast({
-          title: "Procesando pago...",
-          description: "Creando orden y redirigiendo a la pasarela de pago segura.",
-        });
-
-        // Create the order in the database first
-        const { data: orderResult, error: orderError } = await orderService.createOrder(dbOrderData);
-        
-        if (orderError || !orderResult) {
-          throw new Error('No se pudo crear la orden en la base de datos');
-        }
-
-        // Create payment link with WOMPI
         const paymentResponse = await wompiService.createPaymentLink(paymentData);
         
-        if (paymentResponse.data && paymentResponse.data.payment_link_url) {
-          // Create payment record
-          await orderService.createPayment({
-            order_id: orderResult.id,
-            payment_method: 'card',
-            payment_reference: reference,
-            wompi_payment_link_id: paymentResponse.data.id,
-            amount_cents: Math.round(getTotalPrice() * 100),
-            currency: 'USD',
-            payment_data: paymentResponse.data,
-          });
-
-          // Store order data in localStorage for later processing
-          localStorage.setItem('pendingOrder', JSON.stringify({
-            ...orderData,
-            reference: reference,
-            paymentLinkId: paymentResponse.data.id,
-            orderId: orderResult.id,
-          }));
-
-          // Clear cart before redirecting
-          localStorage.removeItem('cartItems');
-          localStorage.removeItem('cartItemsCount');
-
-          // Redirect to WOMPI checkout
-          window.location.href = paymentResponse.data.payment_link_url;
-        } else {
-          throw new Error('No se pudo crear el enlace de pago');
-        }
-      } else {
-        // Cash payment - process normally and save to database
-        const { data: orderResult, error: orderError } = await orderService.createOrder(dbOrderData);
-        
-        if (orderError || !orderResult) {
-          throw new Error('No se pudo crear la orden en la base de datos');
-        }
-
-        // Create payment record for cash payment
-        await orderService.createPayment({
-          order_id: orderResult.id,
-          payment_method: 'cash',
-          payment_reference: reference,
-          amount_cents: Math.round(getTotalPrice() * 100),
-          currency: 'USD',
+        // Update order with WOMPI payment link info
+        await orderService.updateOrderPayment(order.id, {
+          payment_status: 'processing',
+          wompi_payment_link_id: paymentResponse.data.id,
         });
 
-        console.log('Order created successfully:', orderResult);
+        // Create payment record
+        await orderService.createPaymentRecord({
+          order_id: order.id,
+          amount: getTotalPrice(),
+          payment_method: 'credit-debit',
+          processor_reference: orderReference,
+          processor_payment_link: paymentResponse.data.payment_link_url,
+        });
+
+        // Clear cart before redirecting
+        localStorage.removeItem('cartItems');
+        localStorage.removeItem('cartItemsCount');
+
+        // Redirect to WOMPI checkout
+        window.location.href = paymentResponse.data.payment_link_url;
+      } else {
+        // Handle cash payment
+        await orderService.updateOrderPayment(order.id, {
+          payment_status: 'pending',
+        });
+
+        // Create payment record for cash
+        await orderService.createPaymentRecord({
+          order_id: order.id,
+          amount: getTotalPrice(),
+          payment_method: 'cash',
+        });
 
         toast({
           title: "¡Pedido realizado!",
           description: "Tu pedido ha sido enviado correctamente. Te contactaremos pronto.",
         });
-
+        
         // Clear cart and redirect
         localStorage.removeItem('cartItems');
         localStorage.removeItem('cartItemsCount');
         navigate('/');
       }
-    } catch (error) {
-      console.error('Error processing order:', error);
+    } catch (err) {
+      console.error('Error processing order:', err);
       toast({
         title: "Error en el pedido",
-        description: error instanceof Error ? error.message : "No se pudo procesar tu pedido. Por favor intenta nuevamente.",
+        description: err instanceof Error ? err.message : 'Error al procesar el pedido',
         variant: "destructive",
       });
     } finally {
