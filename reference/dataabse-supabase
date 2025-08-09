@@ -10,7 +10,7 @@ CREATE TABLE public.admin_users (
 );
 CREATE TABLE public.orders (
   payment_method text DEFAULT 'pending'::text CHECK (payment_method = ANY (ARRAY['credit-debit'::text, 'cash'::text, 'bank-transfer'::text, 'pending'::text])),
-  payment_status text DEFAULT 'pending'::text CHECK (payment_status = ANY (ARRAY['pending'::text, 'processing'::text, 'completed'::text, 'failed'::text, 'refunded'::text])),
+  payment_status text DEFAULT 'pending'::text CHECK (payment_status = ANY (ARRAY['pending'::text, 'processing'::text, 'completed'::text, 'failed'::text, 'refunded'::text, 'approved'::text, 'declined'::text, 'expired'::text, 'cancelled'::text])),
   wompi_transaction_id text,
   wompi_payment_link_id text,
   wompi_reference text UNIQUE,
@@ -22,9 +22,11 @@ CREATE TABLE public.orders (
   total_amount numeric NOT NULL,
   id uuid NOT NULL DEFAULT gen_random_uuid(),
   quantity integer NOT NULL DEFAULT 1,
-  status text DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'completed'::text, 'cancelled'::text])),
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  payment_reference text,
+  payment_transaction_id text,
+  status text DEFAULT 'pendiente'::text CHECK (status = ANY (ARRAY['pendiente'::text, 'enviada'::text, 'completada'::text, 'cancelada'::text])),
   CONSTRAINT orders_pkey PRIMARY KEY (id),
   CONSTRAINT orders_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(id)
 );

@@ -8,17 +8,33 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { LogOut, Package, ShoppingCart, Plus, Edit } from 'lucide-react';
 import AddProductModal from '@/components/admin/AddProductModal';
 import EditProductModal from '@/components/admin/EditProductModal';
 
+// Add order status types and options
+type OrderStatus = 'pendiente' | 'enviada' | 'completada' | 'cancelada';
+
+const orderStatusOptions: { value: OrderStatus; label: string; color: string }[] = [
+  { value: 'pendiente', label: 'Pendiente', color: 'bg-yellow-500' },
+  { value: 'enviada', label: 'Enviada', color: 'bg-blue-500' },
+  { value: 'completada', label: 'Completada', color: 'bg-green-500' },
+  { value: 'cancelada', label: 'Cancelada', color: 'bg-red-500' }
+];
+
 interface Order {
   id: string;
   customer_name: string;
   customer_email: string;
+  customer_phone?: string;
+  customer_address?: string;
   total_amount: number;
   status: string;
+  payment_method: string;
+  payment_status: string;
   created_at: string;
   products: {
     name: string;
@@ -54,6 +70,7 @@ const AdminDashboard = () => {
   const [showAddProduct, setShowAddProduct] = useState(false);
   const [showEditProduct, setShowEditProduct] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<any>(null);
 
   useEffect(() => {
     if (!admin) {
@@ -72,8 +89,12 @@ const AdminDashboard = () => {
           id,
           customer_name,
           customer_email,
+          customer_phone,
+          customer_address,
           total_amount,
           status,
+          payment_method,
+          payment_status,
           created_at,
           quantity,
           products (name)
@@ -95,39 +116,30 @@ const AdminDashboard = () => {
     }
   };
 
-  const updateOrderStatus = async (orderId: string, status: string) => {
+  const updateOrderStatus = async (orderId: string, newStatus: OrderStatus) => {
     try {
       const { error } = await supabase
         .from('orders')
         .update({ 
-          status, 
-          updated_at: new Date().toISOString() 
+          status: newStatus,
+          updated_at: new Date().toISOString()
         })
         .eq('id', orderId);
-      
-      if (error) {
-        console.error('Error updating order:', error);
-        toast({
-          title: "Error",
-          description: "No se pudo actualizar el estado de la orden",
-          variant: "destructive"
-        });
-        return;
-      }
-      
+
+      if (error) throw error;
+
       toast({
-        title: "Orden actualizada",
-        description: status === 'completed' 
-          ? "La orden ha sido marcada como completada y el stock ha sido actualizado" 
-          : "El estado de la orden ha sido actualizado",
+        title: "Estado actualizado",
+        description: `La orden ha sido marcada como ${orderStatusOptions.find(s => s.value === newStatus)?.label}`,
       });
-      
-      fetchData(); // Refresh data
+
+      // Refresh the orders list
+      await fetchData();
     } catch (error) {
-      console.error('Error updating order:', error);
+      console.error('Error updating order status:', error);
       toast({
         title: "Error",
-        description: "Error al actualizar la orden",
+        description: "No se pudo actualizar el estado de la orden",
         variant: "destructive"
       });
     }
@@ -186,7 +198,7 @@ const AdminDashboard = () => {
             </CardHeader>
             <CardContent>
               <div className="text-2xl font-bold">
-                {orders.filter(order => order.status === 'pending').length}
+                {orders.filter(order => order.status === 'pendiente').length}
               </div>
             </CardContent>
           </Card>
@@ -235,6 +247,7 @@ const AdminDashboard = () => {
                       <TableHead>Producto</TableHead>
                       <TableHead>Cantidad</TableHead>
                       <TableHead>Total</TableHead>
+                      <TableHead>Método de Pago</TableHead>
                       <TableHead>Estado</TableHead>
                       <TableHead>Fecha</TableHead>
                       <TableHead>Acciones</TableHead>
@@ -247,25 +260,43 @@ const AdminDashboard = () => {
                         <TableCell>{order.customer_email}</TableCell>
                         <TableCell>{order.products?.name}</TableCell>
                         <TableCell>{order.quantity}</TableCell>
-                        <TableCell>€{order.total_amount}</TableCell>
+                        <TableCell>${order.total_amount}</TableCell>
                         <TableCell>
-                          <Badge variant={order.status === 'completed' ? 'default' : 'secondary'}>
-                            {order.status === 'pending' ? 'Pendiente' : 
-                             order.status === 'completed' ? 'Completada' : 'Cancelada'}
+                          <Badge variant={order.payment_method === 'credit-debit' ? 'default' : 'secondary'}>
+                            {order.payment_method === 'credit-debit' ? 'Tarjeta' : 'Contra Entrega'}
                           </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Select 
+                            value={order.status} 
+                            onValueChange={(value) => updateOrderStatus(order.id, value as OrderStatus)}
+                          >
+                            <SelectTrigger className="w-[140px]">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {orderStatusOptions.map((option) => (
+                                <SelectItem key={option.value} value={option.value}>
+                                  <div className="flex items-center gap-2">
+                                    <div className={`w-2 h-2 rounded-full ${option.color}`} />
+                                    {option.label}
+                                  </div>
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         </TableCell>
                         <TableCell>
                           {new Date(order.created_at).toLocaleDateString()}
                         </TableCell>
                         <TableCell>
-                          {order.status === 'pending' && (
-                            <Button
-                              size="sm"
-                              onClick={() => updateOrderStatus(order.id, 'completed')}
-                            >
-                              Marcar Completada
-                            </Button>
-                          )}
+                          <Button 
+                            variant="ghost" 
+                            size="sm"
+                            onClick={() => setSelectedOrder(order)}
+                          >
+                            Ver detalles
+                          </Button>
                         </TableCell>
                       </TableRow>
                     ))}
@@ -357,6 +388,80 @@ const AdminDashboard = () => {
           product={selectedProduct}
         />
       )}
+
+      {/* Order Details Dialog */}
+      <Dialog open={!!selectedOrder} onOpenChange={() => setSelectedOrder(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Detalles de la Orden</DialogTitle>
+          </DialogHeader>
+          {selectedOrder && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <h3 className="font-semibold text-sm text-gray-500">Cliente</h3>
+                  <p>{selectedOrder.customer_name}</p>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-sm text-gray-500">Email</h3>
+                  <p>{selectedOrder.customer_email}</p>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-sm text-gray-500">Teléfono</h3>
+                  <p>{selectedOrder.customer_phone || 'No proporcionado'}</p>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-sm text-gray-500">Dirección de Entrega</h3>
+                  <p>{selectedOrder.customer_address || 'No proporcionada'}</p>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-sm text-gray-500">Método de Pago</h3>
+                  <Badge variant={selectedOrder.payment_method === 'credit-debit' ? 'default' : 'secondary'}>
+                    {selectedOrder.payment_method === 'credit-debit' ? 'Tarjeta de Crédito/Débito' : 'Contra Entrega'}
+                  </Badge>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-sm text-gray-500">Estado del Pago</h3>
+                  <p>{selectedOrder.payment_status}</p>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-sm text-gray-500">Total</h3>
+                  <p className="text-lg font-bold">${selectedOrder.total_amount}</p>
+                </div>
+                <div>
+                  <h3 className="font-semibold text-sm text-gray-500">Fecha de Orden</h3>
+                  <p>{new Date(selectedOrder.created_at).toLocaleString()}</p>
+                </div>
+              </div>
+              
+              <div className="border-t pt-4">
+                <h3 className="font-semibold mb-2">Cambiar Estado</h3>
+                <Select 
+                  value={selectedOrder.status} 
+                  onValueChange={async (value) => {
+                    await updateOrderStatus(selectedOrder.id, value as OrderStatus);
+                    setSelectedOrder(null);
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {orderStatusOptions.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        <div className="flex items-center gap-2">
+                          <div className={`w-2 h-2 rounded-full ${option.color}`} />
+                          {option.label}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 };
