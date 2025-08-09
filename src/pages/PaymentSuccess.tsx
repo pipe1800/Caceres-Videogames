@@ -4,12 +4,38 @@ import { CheckCircle, XCircle, Loader2, ArrowRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { supabase } from '@/integrations/supabase/client';
 
+interface Order {
+  id: string;
+  customer_name: string;
+  customer_email: string;
+  customer_phone?: string;
+  customer_address?: string;
+  total_amount: number;
+  payment_status?: string;
+  status: string;
+  payment_reference?: string;
+  payment_transaction_id?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+interface Payment {
+  id: string;
+  order_id: string;
+  amount: number;
+  status: string;
+  processor_transaction_id?: string;
+  processor_reference?: string;
+  created_at: string;
+  updated_at: string;
+}
+
 const PaymentSuccess = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const [status, setStatus] = useState<'loading' | 'success' | 'error'>('loading');
-  const [orderDetails, setOrderDetails] = useState<any>(null);
+  const [orderDetails, setOrderDetails] = useState<Order | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [retryCount, setRetryCount] = useState(0);
   const maxRetries = 10;
@@ -26,144 +52,149 @@ const PaymentSuccess = () => {
 
   const checkPaymentStatus = async () => {
     try {
-      // Try different parameter names that WOMPI might use
-      const transactionId = searchParams.get('id') || 
-                           searchParams.get('transaction_id') || 
-                           searchParams.get('transactionId');
+      // WOMPI sends back these specific parameters
+      const wompiReference = searchParams.get('identificadorEnlaceComercio');
+      const wompiTransactionId = searchParams.get('idTransaccion');
+      const wompiLinkId = searchParams.get('idEnlace');
+      const wompiAmount = searchParams.get('monto');
+      const wompiHash = searchParams.get('hash');
       
-      const reference = searchParams.get('reference') || 
-                       searchParams.get('ref') || 
-                       searchParams.get('payment_reference') ||
-                       searchParams.get('orderReference');
-      
-      // Also check for wompi specific parameters
-      const wompiId = searchParams.get('wompi_id');
-      const wompiReference = searchParams.get('wompi_reference');
-      
-      console.log('Extracted parameters:', {
-        transactionId,
-        reference,
-        wompiId,
+      console.log('WOMPI parameters received:', {
         wompiReference,
+        wompiTransactionId,
+        wompiLinkId,
+        wompiAmount,
+        wompiHash,
         allParams: Object.fromEntries(searchParams.entries())
       });
-      
-      // Try to get the reference from localStorage as a fallback
+
+      // Get stored reference from localStorage as fallback
       const storedReference = localStorage.getItem('currentOrderReference');
       console.log('Stored reference from localStorage:', storedReference);
       
-      const finalReference = reference || wompiReference || storedReference;
+      // Use WOMPI reference if available, otherwise use stored reference
+      const orderReference = wompiReference || storedReference;
       
-      if (!transactionId && !finalReference) {
-        // If we have no parameters, try to find the most recent order for this session
-        const { data: recentOrder, error: recentOrderError } = await supabase
+      if (!orderReference) {
+        setErrorMessage('No se encontró información de la transacción.');
+        setStatus('error');
+        return;
+      }
+
+      // First, try to find the order in the database
+      console.log('Looking for order with reference:', orderReference);
+      
+      let order = null;
+      
+      // Try both payment_reference and wompi_reference
+      const { data: paymentRefOrders, error: paymentRefError } = await supabase
+        .from('orders')
+        .select('*')
+        .eq('payment_reference', orderReference);
+      
+      console.log('Payment reference orders:', paymentRefOrders, 'Error:', paymentRefError);
+      
+      if (paymentRefOrders && paymentRefOrders.length > 0) {
+        order = paymentRefOrders[0];
+        setOrderDetails(order as any);
+      } else {
+        // Try wompi_reference
+        const { data: wompiRefOrders, error: wompiRefError } = await supabase
           .from('orders')
           .select('*')
-          .order('created_at', { ascending: false })
-          .limit(1)
-          .single();
+          .eq('wompi_reference', orderReference);
         
-        if (recentOrder && !recentOrderError) {
-          console.log('Found recent order:', recentOrder);
-          
-          // Check if this order was created recently (within last 5 minutes)
-          const orderTime = new Date(recentOrder.created_at).getTime();
-          const now = new Date().getTime();
-          const fiveMinutes = 5 * 60 * 1000;
-          
-          if (now - orderTime < fiveMinutes) {
-            setOrderDetails(recentOrder);
+        console.log('Wompi reference orders:', wompiRefOrders, 'Error:', wompiRefError);
+        
+        if (wompiRefOrders && wompiRefOrders.length > 0) {
+          order = wompiRefOrders[0];
+          setOrderDetails(order as any);
+        } else {
+          setErrorMessage('No se encontró la orden de compra.');
+          setStatus('error');
+          return;
+        }
+      }
+
+      // If we have a WOMPI transaction ID, check the payment status directly with WOMPI
+      if (wompiTransactionId) {
+        console.log('Checking payment status with WOMPI for transaction:', wompiTransactionId);
+        
+        try {
+          const { data: wompiStatus, error: wompiError } = await supabase.functions.invoke('check-payment-status', {
+            body: { transactionId: wompiTransactionId },
+          });
+
+          console.log('WOMPI status response:', wompiStatus, 'Error:', wompiError);
+
+          if (!wompiError && wompiStatus) {
+            // Use the normalized status returned by the edge function
+            const paymentStatus = wompiStatus.status;
+            const isApproved = wompiStatus.isApproved;
             
-            // Check payment status
-            if (recentOrder.payment_status === 'completed') {
+            console.log('WOMPI payment status:', paymentStatus, 'Is Approved:', isApproved);
+            
+            // Check if payment is approved
+            if (paymentStatus === 'APPROVED' || isApproved === true) {
+              // Update the order status in the database
+              const { error: updateError } = await supabase
+                .from('orders')
+                .update({
+                  status: 'completed',
+                  payment_status: 'completed',
+                  wompi_transaction_id: wompiTransactionId,
+                  payment_transaction_id: wompiTransactionId
+                })
+                .eq('id', order?.id);
+              
+              if (updateError) {
+                console.error('Error updating order:', updateError);
+              }
+              
               setStatus('success');
               localStorage.removeItem('currentOrderReference');
               return;
-            } else if (recentOrder.payment_status === 'failed') {
+            } else if (paymentStatus === 'DECLINED') {
               setErrorMessage('El pago fue rechazado. Por favor, intenta nuevamente.');
               setStatus('error');
               return;
-            }
-            
-            // If still pending/processing, retry
-            if (retryCount < maxRetries) {
-              setRetryCount(prev => prev + 1);
-              setTimeout(() => checkPaymentStatus(), retryDelay);
-              return;
+            } else if (paymentStatus === 'PENDING') {
+              // Payment is still pending, continue checking
+              console.log('Payment still pending from WOMPI');
             }
           }
-        }
-        
-        setErrorMessage('No se encontró información de la transacción. Si realizaste un pago, por favor contacta soporte.');
-        setStatus('error');
-        return;
-      }
-
-      // Try to find the order using any available reference
-      let orderQuery = supabase.from('orders').select('*');
-      
-      if (finalReference) {
-        orderQuery = orderQuery.or(`wompi_reference.eq.${finalReference}`);
-      }
-      
-      if (transactionId) {
-        if (finalReference) {
-          orderQuery = orderQuery.or(`wompi_transaction_id.eq.${transactionId}`);
-        } else {
-          orderQuery = orderQuery.eq('wompi_transaction_id', transactionId);
+        } catch (error) {
+          console.error('Error calling check-payment-status function:', error);
+          // Continue to check order status in database even if function fails
         }
       }
 
-      const { data: orders, error: orderError } = await orderQuery.single();
-
-      if (orderError || !orders) {
-        console.log('Order not found, retrying...', { retryCount, maxRetries });
+      // Check the order status in the database
+      if (order) {
+        const orderStatus = order.status;
         
+        if (orderStatus === 'completed' || orderStatus === 'confirmed') {
+          setStatus('success');
+          localStorage.removeItem('currentOrderReference');
+          return;
+        } else if (orderStatus === 'cancelled') {
+          setErrorMessage('El pago fue cancelado.');
+          setStatus('error');
+          return;
+        }
+        
+        // If still pending/processing, retry
         if (retryCount < maxRetries) {
+          console.log('Payment still processing, retrying...');
           setRetryCount(prev => prev + 1);
           setTimeout(() => checkPaymentStatus(), retryDelay);
           return;
         }
         
-        console.error('Order lookup error:', orderError);
-        setErrorMessage('No se encontró la orden asociada a esta transacción. Por favor, verifica tu email para confirmación o contacta soporte.');
-        setStatus('error');
-        return;
-      }
-
-      console.log('Order found:', orders);
-      setOrderDetails(orders);
-
-      // Check payment status
-      if (orders.payment_status === 'completed') {
-        setStatus('success');
-        localStorage.removeItem('currentOrderReference');
-        return;
-      }
-
-      if (orders.payment_status === 'failed') {
-        setErrorMessage('El pago fue rechazado. Por favor, intenta nuevamente.');
-        setStatus('error');
-        return;
-      }
-
-      // If still pending/processing, retry
-      if (orders.payment_status === 'pending' || orders.payment_status === 'processing') {
-        console.log('Payment still processing, retrying...');
-        
-        if (retryCount < maxRetries) {
-          setRetryCount(prev => prev + 1);
-          setTimeout(() => checkPaymentStatus(), retryDelay);
-          return;
-        }
-        
+        // Max retries reached
         setErrorMessage('Tu pago está siendo procesado. Recibirás una confirmación por email en breve.');
         setStatus('error');
-        return;
       }
-
-      // Default to success if we have an order
-      setStatus('success');
 
     } catch (error) {
       console.error('Error checking payment status:', error);

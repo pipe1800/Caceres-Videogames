@@ -28,16 +28,6 @@ CREATE TABLE public.orders (
   CONSTRAINT orders_pkey PRIMARY KEY (id),
   CONSTRAINT orders_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(id)
 );
-CREATE TABLE public.payment_webhooks (
-  payment_id uuid,
-  event_type text NOT NULL,
-  payload jsonb NOT NULL,
-  id uuid NOT NULL DEFAULT gen_random_uuid(),
-  processed boolean DEFAULT false,
-  created_at timestamp with time zone NOT NULL DEFAULT now(),
-  CONSTRAINT payment_webhooks_pkey PRIMARY KEY (id),
-  CONSTRAINT payment_webhooks_payment_id_fkey FOREIGN KEY (payment_id) REFERENCES public.payments(id)
-);
 CREATE TABLE public.payments (
   order_id uuid NOT NULL,
   amount numeric NOT NULL,
@@ -75,3 +65,4 @@ CREATE TABLE public.products (
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   updated_at timestamp with time zone NOT NULL DEFAULT now(),
   CONSTRAINT products_pkey PRIMARY KEY (id)
+);

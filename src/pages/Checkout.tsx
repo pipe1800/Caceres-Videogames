@@ -206,7 +206,8 @@ const Checkout = () => {
         quantity: cartItems.reduce((total, item) => total + item.quantity, 0),
         total_amount: getTotalPrice(),
         payment_method: paymentMethod === 'card' ? 'credit-debit' : 'cash',
-        wompi_reference: paymentMethod === 'card' ? orderReference : undefined,
+        wompi_reference: orderReference, // Use wompi_reference which exists in the database
+        payment_reference: orderReference, // Also set payment_reference since we added it
         cart_items: cartItems.map(item => ({
           id: item.id,
           quantity: item.quantity,
