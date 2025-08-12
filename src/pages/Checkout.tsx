@@ -304,26 +304,26 @@ const Checkout = () => {
 
         {/* Page Title */}
         <div className="text-center mb-8">
-          <h1 className="text-4xl font-black text-white mb-4 flex items-center justify-center gap-3">
-            <CheckCircle className="w-10 h-10 text-[#3bc8da]" />
+          <h1 className="text-3xl sm:text-4xl font-black text-white mb-3 sm:mb-4 flex items-center justify-center gap-3">
+            <CheckCircle className="w-8 h-8 sm:w-10 sm:h-10 text-[#3bc8da]" />
             Hacer Pedido
           </h1>
-          <p className="text-gray-300 text-lg">Completa tu información para finalizar el pedido</p>
+          <p className="text-gray-300 text-base sm:text-lg">Completa tu información para finalizar el pedido</p>
         </div>
 
-        <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-8">
+        <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-8">
           
-          {/* Order Form */}
-          <div className="lg:col-span-2 space-y-6">
+          {/* Order Form - Full width on mobile */}
+          <div className="lg:col-span-2 space-y-4 sm:space-y-6">
             
             {/* Customer Information */}
-            <div className="bg-white/95 backdrop-blur-sm rounded-2xl p-6 shadow-xl border-2 border-[#3bc8da]/20">
-              <h2 className="text-2xl font-bold text-[#091024] mb-6 flex items-center gap-3">
-                <CheckCircle className="w-6 h-6 text-[#3bc8da]" />
+            <div className="bg-white/95 backdrop-blur-sm rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-xl border-2 border-[#3bc8da]/20">
+              <h2 className="text-xl sm:text-2xl font-bold text-[#091024] mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
+                <CheckCircle className="w-5 h-5 sm:w-6 sm:h-6 text-[#3bc8da]" />
                 Información Personal
               </h2>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 <div>
                   <Label htmlFor="firstName">Nombre *</Label>
                   <Input
@@ -370,9 +370,9 @@ const Checkout = () => {
             </div>
 
             {/* Delivery Type */}
-            <div className="bg-white/95 backdrop-blur-sm rounded-2xl p-6 shadow-xl border-2 border-[#3bc8da]/20">
-              <h2 className="text-2xl font-bold text-[#091024] mb-6 flex items-center gap-3">
-                <Truck className="w-6 h-6 text-[#3bc8da]" />
+            <div className="bg-white/95 backdrop-blur-sm rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-xl border-2 border-[#3bc8da]/20">
+              <h2 className="text-xl sm:text-2xl font-bold text-[#091024] mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
+                <Truck className="w-5 h-5 sm:w-6 sm:h-6 text-[#3bc8da]" />
                 Tipo de Entrega
               </h2>
               
@@ -425,7 +425,7 @@ const Checkout = () => {
               {/* Delivery Address */}
               {deliveryType === 'delivery' && (
                 <div className="mt-6 space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                     <div>
                       <Label htmlFor="department">Departamento *</Label>
                       <Select value={selectedDepartment} onValueChange={setSelectedDepartment}>
@@ -494,9 +494,9 @@ const Checkout = () => {
             </div>
 
             {/* Payment Method */}
-            <div className="bg-white/95 backdrop-blur-sm rounded-2xl p-6 shadow-xl border-2 border-[#3bc8da]/20">
-              <h2 className="text-2xl font-bold text-[#091024] mb-6 flex items-center gap-3">
-                <CreditCard className="w-6 h-6 text-[#3bc8da]" />
+            <div className="bg-white/95 backdrop-blur-sm rounded-xl sm:rounded-2xl p-4 sm:p-6 shadow-xl border-2 border-[#3bc8da]/20">
+              <h2 className="text-xl sm:text-2xl font-bold text-[#091024] mb-4 sm:mb-6 flex items-center gap-2 sm:gap-3">
+                <CreditCard className="w-5 h-5 sm:w-6 sm:h-6 text-[#3bc8da]" />
                 Método de Pago
               </h2>
               
@@ -524,10 +524,10 @@ const Checkout = () => {
             </div>
           </div>
 
-          {/* Order Summary */}
+          {/* Order Summary - Sticky on desktop, normal on mobile */}
           <div className="lg:col-span-1">
-            <div className="bg-white/95 backdrop-blur-sm rounded-3xl p-6 shadow-2xl border-2 border-[#3bc8da]/20 sticky top-8">
-              <h2 className="text-xl font-bold text-[#091024] mb-6">Resumen del Pedido</h2>
+            <div className="bg-white/95 backdrop-blur-sm rounded-xl sm:rounded-3xl p-4 sm:p-6 shadow-2xl border-2 border-[#3bc8da]/20 lg:sticky lg:top-8">
+              <h2 className="text-lg sm:text-xl font-bold text-[#091024] mb-4 sm:mb-6">Resumen del Pedido</h2>
               
               {/* Cart Items */}
               <div className="space-y-3 mb-6">
@@ -568,7 +568,7 @@ const Checkout = () => {
               <Button
                 onClick={handlePlaceOrder}
                 disabled={isProcessingPayment}
-                className="w-full bg-gradient-to-r from-[#3bc8da] to-[#3fdb70] hover:from-[#3fdb70] hover:to-[#3bc8da] text-white py-4 px-6 rounded-xl font-bold text-lg transition-all duration-300 transform hover:scale-105 shadow-lg h-auto disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
+                className="w-full bg-gradient-to-r from-[#3bc8da] to-[#3fdb70] hover:from-[#3fdb70] hover:to-[#3bc8da] text-white py-3 sm:py-4 px-6 rounded-xl font-bold text-base sm:text-lg transition-all duration-300 transform hover:scale-105 shadow-lg h-auto disabled:opacity-50 disabled:cursor-not-allowed disabled:transform-none"
               >
                 {isProcessingPayment ? (
                   <div className="flex items-center gap-2">
@@ -591,6 +591,6 @@ const Checkout = () => {
       <Footer />
     </div>
   );
-};
+}
 
 export default Checkout;

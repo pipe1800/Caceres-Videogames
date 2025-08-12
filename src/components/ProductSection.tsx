@@ -71,11 +71,11 @@ const ProductSection = ({ title, products, onAddToCart }: ProductSectionProps) =
         </div>
         
         {/* Products Grid with Enhanced Design */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-8 items-stretch">
           {products.map((product, index) => (
             <div 
               key={product.id}
-              className="transform hover:scale-105 transition-all duration-300"
+              className="h-full transform hover:scale-105 transition-all duration-300"
               style={{
                 animationDelay: `${index * 100}ms`
               }}

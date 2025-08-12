@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAdmin } from '@/hooks/useAdmin';
@@ -85,7 +84,7 @@ const AdminDashboard = () => {
       // Fetch orders
       const { data: ordersData } = await supabase
         .from('orders')
-        .select(`
+        .select<any>(`
           id,
           customer_name,
           customer_email,
@@ -107,7 +106,7 @@ const AdminDashboard = () => {
         .select('*')
         .order('created_at', { ascending: false });
 
-      setOrders(ordersData || []);
+      setOrders((ordersData as Order[]) || []);
       setProducts(productsData || []);
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -190,7 +189,7 @@ const AdminDashboard = () => {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-8">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Órdenes Pendientes</CardTitle>
@@ -228,7 +227,7 @@ const AdminDashboard = () => {
 
         {/* Tabs */}
         <Tabs defaultValue="orders" className="space-y-4">
-          <TabsList>
+          <TabsList className="w-full overflow-x-auto">
             <TabsTrigger value="orders">Órdenes</TabsTrigger>
             <TabsTrigger value="products">Productos</TabsTrigger>
           </TabsList>
@@ -238,70 +237,72 @@ const AdminDashboard = () => {
               <CardHeader>
                 <CardTitle>Gestión de Órdenes</CardTitle>
               </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Cliente</TableHead>
-                      <TableHead>Email</TableHead>
-                      <TableHead>Producto</TableHead>
-                      <TableHead>Cantidad</TableHead>
-                      <TableHead>Total</TableHead>
-                      <TableHead>Método de Pago</TableHead>
-                      <TableHead>Estado</TableHead>
-                      <TableHead>Fecha</TableHead>
-                      <TableHead>Acciones</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {orders.map((order) => (
-                      <TableRow key={order.id}>
-                        <TableCell>{order.customer_name}</TableCell>
-                        <TableCell>{order.customer_email}</TableCell>
-                        <TableCell>{order.products?.name}</TableCell>
-                        <TableCell>{order.quantity}</TableCell>
-                        <TableCell>${order.total_amount}</TableCell>
-                        <TableCell>
-                          <Badge variant={order.payment_method === 'credit-debit' ? 'default' : 'secondary'}>
-                            {order.payment_method === 'credit-debit' ? 'Tarjeta' : 'Contra Entrega'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Select 
-                            value={order.status} 
-                            onValueChange={(value) => updateOrderStatus(order.id, value as OrderStatus)}
-                          >
-                            <SelectTrigger className="w-[140px]">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {orderStatusOptions.map((option) => (
-                                <SelectItem key={option.value} value={option.value}>
-                                  <div className="flex items-center gap-2">
-                                    <div className={`w-2 h-2 rounded-full ${option.color}`} />
-                                    {option.label}
-                                  </div>
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                        </TableCell>
-                        <TableCell>
-                          {new Date(order.created_at).toLocaleDateString()}
-                        </TableCell>
-                        <TableCell>
-                          <Button 
-                            variant="ghost" 
-                            size="sm"
-                            onClick={() => setSelectedOrder(order)}
-                          >
-                            Ver detalles
-                          </Button>
-                        </TableCell>
+              <CardContent className="overflow-x-auto">
+                <div className="min-w-[720px]">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="hidden sm:table-cell">Cliente</TableHead>
+                        <TableHead>Email</TableHead>
+                        <TableHead className="hidden md:table-cell">Producto</TableHead>
+                        <TableHead className="hidden lg:table-cell">Cantidad</TableHead>
+                        <TableHead>Total</TableHead>
+                        <TableHead className="hidden sm:table-cell">Método de Pago</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead className="hidden md:table-cell">Fecha</TableHead>
+                        <TableHead>Acciones</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {orders.map((order) => (
+                        <TableRow key={order.id}>
+                          <TableCell className="hidden sm:table-cell">{order.customer_name}</TableCell>
+                          <TableCell className="text-xs sm:text-sm truncate max-w-[140px]">{order.customer_email}</TableCell>
+                          <TableCell className="hidden md:table-cell">{order.products?.name}</TableCell>
+                          <TableCell className="hidden lg:table-cell">{order.quantity}</TableCell>
+                          <TableCell>${order.total_amount}</TableCell>
+                          <TableCell className="hidden sm:table-cell">
+                            <Badge variant={order.payment_method === 'credit-debit' ? 'default' : 'secondary'}>
+                              {order.payment_method === 'credit-debit' ? 'Tarjeta' : 'Contra Entrega'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell>
+                            <Select 
+                              value={order.status} 
+                              onValueChange={(value) => updateOrderStatus(order.id, value as OrderStatus)}
+                            >
+                              <SelectTrigger className="w-[120px] sm:w-[140px]">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {orderStatusOptions.map((option) => (
+                                  <SelectItem key={option.value} value={option.value}>
+                                    <div className="flex items-center gap-2">
+                                      <div className={`w-2 h-2 rounded-full ${option.color}`} />
+                                      {option.label}
+                                    </div>
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell">
+                            {new Date(order.created_at).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>
+                            <Button 
+                              variant="ghost" 
+                              size="sm"
+                              onClick={() => setSelectedOrder(order)}
+                            >
+                              Ver detalles
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>
@@ -318,51 +319,53 @@ const AdminDashboard = () => {
                   Agregar Producto
                 </Button>
               </CardHeader>
-              <CardContent>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>SKU</TableHead>
-                      <TableHead>Nombre</TableHead>
-                      <TableHead>Precio</TableHead>
-                      <TableHead>Consola</TableHead>
-                      <TableHead>Stock</TableHead>
-                      <TableHead>Estado</TableHead>
-                      <TableHead>Fecha</TableHead>
-                      <TableHead>Acciones</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {products.map((product) => (
-                      <TableRow key={product.id}>
-                        <TableCell className="font-mono text-sm">{product.sku}</TableCell>
-                        <TableCell>{product.name}</TableCell>
-                        <TableCell>€{product.price}</TableCell>
-                        <TableCell>{product.console}</TableCell>
-                        <TableCell>{product.stock_count}</TableCell>
-                        <TableCell>
-                          <Badge variant={product.in_stock ? 'default' : 'destructive'}>
-                            {product.in_stock ? 'En Stock' : 'Sin Stock'}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          {new Date(product.created_at).toLocaleDateString()}
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleEditProduct(product)}
-                            className="flex items-center gap-1"
-                          >
-                            <Edit className="h-3 w-3" />
-                            Editar
-                          </Button>
-                        </TableCell>
+              <CardContent className="overflow-x-auto">
+                <div className="min-w-[800px]">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="hidden sm:table-cell">SKU</TableHead>
+                        <TableHead>Nombre</TableHead>
+                        <TableHead>Precio</TableHead>
+                        <TableHead className="hidden md:table-cell">Consola</TableHead>
+                        <TableHead>Stock</TableHead>
+                        <TableHead>Estado</TableHead>
+                        <TableHead className="hidden md:table-cell">Fecha</TableHead>
+                        <TableHead>Acciones</TableHead>
                       </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                    </TableHeader>
+                    <TableBody>
+                      {products.map((product) => (
+                        <TableRow key={product.id}>
+                          <TableCell className="font-mono text-sm hidden sm:table-cell">{product.sku}</TableCell>
+                          <TableCell>{product.name}</TableCell>
+                          <TableCell>€{product.price}</TableCell>
+                          <TableCell className="hidden md:table-cell">{product.console}</TableCell>
+                          <TableCell>{product.stock_count}</TableCell>
+                          <TableCell>
+                            <Badge variant={product.in_stock ? 'default' : 'destructive'}>
+                              {product.in_stock ? 'En Stock' : 'Sin Stock'}
+                            </Badge>
+                          </TableCell>
+                          <TableCell className="hidden md:table-cell">
+                            {new Date(product.created_at).toLocaleDateString()}
+                          </TableCell>
+                          <TableCell>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => handleEditProduct(product)}
+                              className="flex items-center gap-1"
+                            >
+                              <Edit className="h-3 w-3" />
+                              Editar
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               </CardContent>
             </Card>
           </TabsContent>

@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { supabase } from '@/integrations/supabase/client';
@@ -29,6 +28,7 @@ const Index = () => {
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [newProducts, setNewProducts] = useState<Product[]>([]);
   const [saleProducts, setSaleProducts] = useState<Product[]>([]);
+  const [searchQuery, setSearchQuery] = useState('');
 
   useEffect(() => {
     fetchProducts();
@@ -152,6 +152,15 @@ const Index = () => {
     }));
   };
 
+  // Optionally filter in-page sections by search query
+  const filteredNew = newProducts.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
+  const filteredSale = saleProducts.filter(p => p.name.toLowerCase().includes(searchQuery.toLowerCase()));
+
+  const handleSearchSubmit = () => {
+    if (searchQuery.trim().length === 0) return;
+    navigate(`/products?search=${encodeURIComponent(searchQuery.trim())}`);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-[#091024] via-slate-800 to-white">
       <Header 
@@ -161,14 +170,18 @@ const Index = () => {
       <Navigation 
         onCategorySelect={handleCategorySelect}
       />
-      <Hero />
+      <Hero
+        searchQuery={searchQuery}
+        onSearchChange={setSearchQuery}
+        onSearchSubmit={handleSearchSubmit}
+      />
       
       {/* Product Sections with alternating backgrounds */}
       <div className="bg-white/95 backdrop-blur-sm">
         {newProducts.length > 0 && (
           <ProductSection 
             title="🆕 Productos Nuevos"
-            products={transformProducts(newProducts)}
+            products={transformProducts(filteredNew)}
             onAddToCart={handleAddToCart}
           />
         )}
@@ -178,7 +191,7 @@ const Index = () => {
         {saleProducts.length > 0 && (
           <ProductSection 
             title="🔥 Ofertas Especiales"
-            products={transformProducts(saleProducts)}
+            products={transformProducts(filteredSale)}
             onAddToCart={handleAddToCart}
           />
         )}
