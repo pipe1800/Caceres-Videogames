@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { useAdmin } from '@/hooks/useAdmin';
 import { supabase } from '@/integrations/supabase/client';
 import { useToast } from '@/hooks/use-toast';
@@ -10,8 +10,7 @@ import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { LogOut, Package, ShoppingCart, Plus, Edit } from 'lucide-react';
-import AddProductModal from '@/components/admin/AddProductModal';
+import { LogOut, Package, ShoppingCart, Plus, Edit, Trash2 } from 'lucide-react';
 import EditProductModal from '@/components/admin/EditProductModal';
 
 // Add order status types and options
@@ -57,16 +56,17 @@ interface Product {
   is_new: boolean;
   is_on_sale: boolean;
   features: string[];
+  categories?: string[];
 }
 
 const AdminDashboard = () => {
   const { admin, logout } = useAdmin();
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
   const [orders, setOrders] = useState<Order[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [showAddProduct, setShowAddProduct] = useState(false);
   const [showEditProduct, setShowEditProduct] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
@@ -106,7 +106,7 @@ const AdminDashboard = () => {
         .select('*')
         .order('created_at', { ascending: false });
 
-      setOrders((ordersData as Order[]) || []);
+      setOrders(((ordersData ?? []) as any));
       setProducts(productsData || []);
     } catch (error) {
       console.error('Error fetching data:', error);
@@ -152,6 +152,32 @@ const AdminDashboard = () => {
   const handleLogout = () => {
     logout();
     navigate('/admin');
+  };
+
+  const deleteProduct = async (productId: string) => {
+    if (!confirm('¿Eliminar este producto? Esta acción no se puede deshacer.')) return;
+    try {
+      // Remove category links first to avoid FK conflicts
+      await supabase.from('product_categories').delete().eq('product_id', productId);
+
+      const { error } = await supabase.from('products').delete().eq('id', productId);
+      if (error) {
+        // Likely FK violation due to orders referencing this product
+        console.error('Error deleting product:', error);
+        toast({
+          title: 'No se pudo eliminar',
+          description: 'Este producto tiene órdenes asociadas. No puede ser eliminado. Podemos desactivarlo si lo prefieres.',
+          variant: 'destructive'
+        });
+        return;
+      }
+
+      toast({ title: 'Producto eliminado' });
+      await fetchData();
+    } catch (err) {
+      console.error('Error deleting product:', err);
+      toast({ title: 'Error', description: 'No se pudo eliminar el producto', variant: 'destructive' });
+    }
   };
 
   if (isLoading) {
@@ -226,10 +252,10 @@ const AdminDashboard = () => {
         </div>
 
         {/* Tabs */}
-        <Tabs defaultValue="orders" className="space-y-4">
-          <TabsList className="w-full overflow-x-auto">
-            <TabsTrigger value="orders">Órdenes</TabsTrigger>
-            <TabsTrigger value="products">Productos</TabsTrigger>
+        <Tabs defaultValue={new URLSearchParams(location.search).get('tab') || 'orders'} className="space-y-4">
+          <TabsList className="w-full grid grid-cols-2 sm:inline-flex">
+            <TabsTrigger className="w-full" value="orders">Órdenes</TabsTrigger>
+            <TabsTrigger className="w-full" value="products">Productos</TabsTrigger>
           </TabsList>
 
           <TabsContent value="orders">
@@ -237,31 +263,103 @@ const AdminDashboard = () => {
               <CardHeader>
                 <CardTitle>Gestión de Órdenes</CardTitle>
               </CardHeader>
-              <CardContent className="overflow-x-auto">
-                <div className="min-w-[720px]">
+              <CardContent>
+                {/* Mobile list (no horizontal scroll) */}
+                <div className="md:hidden space-y-3">
+                  {orders.length === 0 && (
+                    <div className="text-sm text-gray-500">No hay órdenes aún.</div>
+                  )}
+                  {orders.map((order) => (
+                    <div key={order.id} className="rounded-lg border bg-white p-4 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-medium text-gray-900 truncate max-w-[220px]">
+                            {order.customer_name || order.customer_email}
+                          </p>
+                          <p className="text-xs text-gray-600 truncate max-w-[220px]">
+                            {order.customer_email}
+                          </p>
+                        </div>
+                        <Badge variant={order.payment_method === 'credit-debit' ? 'default' : 'secondary'}>
+                          {order.payment_method === 'credit-debit' ? 'Tarjeta' : 'Contra Entrega'}
+                        </Badge>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <p className="text-gray-500">Producto</p>
+                          <p className="font-medium truncate">{order.products?.name || '-'}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-gray-500">Cantidad</p>
+                          <p className="font-medium">{order.quantity}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500">Total</p>
+                          <p className="font-semibold">${order.total_amount}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-gray-500">Fecha</p>
+                          <p className="font-medium">{new Date(order.created_at).toLocaleDateString()}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 flex flex-col gap-2">
+                        <Select 
+                          value={order.status}
+                          onValueChange={(value) => updateOrderStatus(order.id, value as OrderStatus)}
+                        >
+                          <SelectTrigger className="w-full">
+                            <SelectValue placeholder="Estado" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {orderStatusOptions.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>
+                                <div className="flex items-center gap-2">
+                                  <div className={`w-2 h-2 rounded-full ${option.color}`} />
+                                  {option.label}
+                                </div>
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <Button 
+                          variant="outline" 
+                          size="sm" 
+                          onClick={() => setSelectedOrder(order)}
+                        >
+                          Ver detalles
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop table */}
+                <div className="hidden md:block">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="hidden sm:table-cell">Cliente</TableHead>
+                        <TableHead className="hidden lg:table-cell">Cliente</TableHead>
                         <TableHead>Email</TableHead>
-                        <TableHead className="hidden md:table-cell">Producto</TableHead>
-                        <TableHead className="hidden lg:table-cell">Cantidad</TableHead>
+                        <TableHead className="hidden xl:table-cell">Producto</TableHead>
+                        <TableHead className="hidden xl:table-cell">Cantidad</TableHead>
                         <TableHead>Total</TableHead>
-                        <TableHead className="hidden sm:table-cell">Método de Pago</TableHead>
+                        <TableHead className="hidden lg:table-cell">Método de Pago</TableHead>
                         <TableHead>Estado</TableHead>
-                        <TableHead className="hidden md:table-cell">Fecha</TableHead>
+                        <TableHead className="hidden lg:table-cell">Fecha</TableHead>
                         <TableHead>Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {orders.map((order) => (
                         <TableRow key={order.id}>
-                          <TableCell className="hidden sm:table-cell">{order.customer_name}</TableCell>
-                          <TableCell className="text-xs sm:text-sm truncate max-w-[140px]">{order.customer_email}</TableCell>
-                          <TableCell className="hidden md:table-cell">{order.products?.name}</TableCell>
-                          <TableCell className="hidden lg:table-cell">{order.quantity}</TableCell>
+                          <TableCell className="hidden lg:table-cell">{order.customer_name}</TableCell>
+                          <TableCell className="text-sm truncate max-w-[220px]">{order.customer_email}</TableCell>
+                          <TableCell className="hidden xl:table-cell">{order.products?.name}</TableCell>
+                          <TableCell className="hidden xl:table-cell">{order.quantity}</TableCell>
                           <TableCell>${order.total_amount}</TableCell>
-                          <TableCell className="hidden sm:table-cell">
+                          <TableCell className="hidden lg:table-cell">
                             <Badge variant={order.payment_method === 'credit-debit' ? 'default' : 'secondary'}>
                               {order.payment_method === 'credit-debit' ? 'Tarjeta' : 'Contra Entrega'}
                             </Badge>
@@ -271,7 +369,7 @@ const AdminDashboard = () => {
                               value={order.status} 
                               onValueChange={(value) => updateOrderStatus(order.id, value as OrderStatus)}
                             >
-                              <SelectTrigger className="w-[120px] sm:w-[140px]">
+                              <SelectTrigger className="w-[140px]">
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
@@ -286,7 +384,7 @@ const AdminDashboard = () => {
                               </SelectContent>
                             </Select>
                           </TableCell>
-                          <TableCell className="hidden md:table-cell">
+                          <TableCell className="hidden lg:table-cell">
                             {new Date(order.created_at).toLocaleDateString()}
                           </TableCell>
                           <TableCell>
@@ -312,45 +410,106 @@ const AdminDashboard = () => {
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Gestión de Productos</CardTitle>
                 <Button 
-                  onClick={() => setShowAddProduct(true)}
+                  onClick={() => navigate('/admin/add')}
                   className="flex items-center gap-2"
                 >
                   <Plus className="h-4 w-4" />
                   Agregar Producto
                 </Button>
               </CardHeader>
-              <CardContent className="overflow-x-auto">
-                <div className="min-w-[800px]">
+              <CardContent>
+                {/* Mobile list */}
+                <div className="md:hidden space-y-3">
+                  {products.length === 0 && (
+                    <div className="text-sm text-gray-500">No hay productos aún.</div>
+                  )}
+                  {products.map((product) => (
+                    <div key={product.id} className="rounded-lg border bg-white p-4 shadow-sm">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="font-medium text-gray-900 truncate max-w-[220px]">{product.name}</p>
+                          <p className="text-xs text-gray-600">SKU: <span className="font-mono">{product.sku}</span></p>
+                        </div>
+                        <Badge variant={product.in_stock ? 'default' : 'destructive'}>
+                          {product.in_stock ? 'En Stock' : 'Sin Stock'}
+                        </Badge>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <p className="text-gray-500">Precio</p>
+                          <p className="font-semibold">{'$'}{product.price.toFixed(2)}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-gray-500">Stock</p>
+                          <p className="font-medium">{product.stock_count}</p>
+                        </div>
+                        <div>
+                          <p className="text-gray-500">Categorías</p>
+                          <p className="font-medium">{product.categories?.length ? product.categories.join(', ') : (product.category || product.console)}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-gray-500">Fecha</p>
+                          <p className="font-medium">{new Date(product.created_at).toLocaleDateString()}</p>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleEditProduct(product)}
+                          className="w-full flex items-center justify-center gap-1"
+                        >
+                          <Edit className="h-3 w-3" />
+                          Editar
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="destructive"
+                          onClick={() => deleteProduct(product.id)}
+                          className="w-full flex items-center justify-center gap-1"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                          Eliminar
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Desktop table */}
+                <div className="hidden md:block">
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="hidden sm:table-cell">SKU</TableHead>
+                        <TableHead className="hidden lg:table-cell">SKU</TableHead>
                         <TableHead>Nombre</TableHead>
                         <TableHead>Precio</TableHead>
-                        <TableHead className="hidden md:table-cell">Consola</TableHead>
+                        <TableHead className="hidden xl:table-cell">Categorías</TableHead>
                         <TableHead>Stock</TableHead>
                         <TableHead>Estado</TableHead>
-                        <TableHead className="hidden md:table-cell">Fecha</TableHead>
+                        <TableHead className="hidden xl:table-cell">Fecha</TableHead>
                         <TableHead>Acciones</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {products.map((product) => (
                         <TableRow key={product.id}>
-                          <TableCell className="font-mono text-sm hidden sm:table-cell">{product.sku}</TableCell>
+                          <TableCell className="font-mono text-sm hidden lg:table-cell">{product.sku}</TableCell>
                           <TableCell>{product.name}</TableCell>
-                          <TableCell>€{product.price}</TableCell>
-                          <TableCell className="hidden md:table-cell">{product.console}</TableCell>
+                          <TableCell>{'$'}{product.price.toFixed(2)}</TableCell>
+                          <TableCell className="hidden xl:table-cell">{product.categories?.length ? product.categories.join(', ') : (product.category || product.console)}</TableCell>
                           <TableCell>{product.stock_count}</TableCell>
                           <TableCell>
                             <Badge variant={product.in_stock ? 'default' : 'destructive'}>
                               {product.in_stock ? 'En Stock' : 'Sin Stock'}
                             </Badge>
                           </TableCell>
-                          <TableCell className="hidden md:table-cell">
+                          <TableCell className="hidden xl:table-cell">
                             {new Date(product.created_at).toLocaleDateString()}
                           </TableCell>
-                          <TableCell>
+                          <TableCell className="flex gap-2">
                             <Button
                               size="sm"
                               variant="outline"
@@ -359,6 +518,15 @@ const AdminDashboard = () => {
                             >
                               <Edit className="h-3 w-3" />
                               Editar
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={() => deleteProduct(product.id)}
+                              className="flex items-center gap-1"
+                            >
+                              <Trash2 className="h-3 w-3" />
+                              Eliminar
                             </Button>
                           </TableCell>
                         </TableRow>
@@ -372,20 +540,13 @@ const AdminDashboard = () => {
         </Tabs>
       </main>
 
-      {showAddProduct && (
-        <AddProductModal
-          isOpen={showAddProduct}
-          onClose={() => setShowAddProduct(false)}
-          onProductAdded={fetchData}
-        />
-      )}
-
       {showEditProduct && selectedProduct && (
         <EditProductModal
           isOpen={showEditProduct}
           onClose={() => {
             setShowEditProduct(false);
             setSelectedProduct(null);
+            fetchData();
           }}
           onProductUpdated={fetchData}
           product={selectedProduct}
@@ -394,20 +555,20 @@ const AdminDashboard = () => {
 
       {/* Order Details Dialog */}
       <Dialog open={!!selectedOrder} onOpenChange={() => setSelectedOrder(null)}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="w-[95vw] sm:max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Detalles de la Orden</DialogTitle>
           </DialogHeader>
           {selectedOrder && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <h3 className="font-semibold text-sm text-gray-500">Cliente</h3>
                   <p>{selectedOrder.customer_name}</p>
                 </div>
                 <div>
                   <h3 className="font-semibold text-sm text-gray-500">Email</h3>
-                  <p>{selectedOrder.customer_email}</p>
+                  <p className="break-all">{selectedOrder.customer_email}</p>
                 </div>
                 <div>
                   <h3 className="font-semibold text-sm text-gray-500">Teléfono</h3>

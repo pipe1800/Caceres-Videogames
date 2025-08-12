@@ -16,11 +16,17 @@ const Footer = () => {
               Productos originales y los mejores precios.
             </p>
             <div className="flex gap-4">
-              <a href="https://wa.me/50379866174" target="_blank" rel="noopener noreferrer" className="text-[#3fdb70] hover:text-[#3fdb70]/80">
+              <a href="https://wa.me/50379866174" target="_blank" rel="noopener noreferrer" className="text-[#3fdb70] hover:text-[#3fdb70]/80" aria-label="WhatsApp">
                 <MessageCircle className="w-6 h-6" />
               </a>
-              <a href="https://www.facebook.com/share/1L2HRXV8s1/" target="_blank" rel="noopener noreferrer" className="text-[#3bc8da] hover:text-[#3bc8da]/80">
+              <a href="https://www.facebook.com/share/1L2HRXV8s1/" target="_blank" rel="noopener noreferrer" className="text-[#3bc8da] hover:text-[#3bc8da]/80" aria-label="Facebook">
                 <Facebook className="w-6 h-6" />
+              </a>
+              <a href="https://www.instagram.com/caceres.videogames?igsh=ejZsN2Vsb2syZGhv" target="_blank" rel="noopener noreferrer" className="text-[#f3cb49] hover:text-[#f3cb49]/80" aria-label="Instagram">
+                {/* Simple Instagram glyph using an SVG path to avoid extra deps */}
+                <svg viewBox="0 0 24 24" fill="currentColor" className="w-6 h-6" aria-hidden="true">
+                  <path d="M7 2C4.239 2 2 4.239 2 7v10c0 2.761 2.239 5 5 5h10c2.761 0 5-2.239 5-5V7c0-2.761-2.239-5-5-5H7zm0 2h10c1.654 0 3 1.346 3 3v10c0 1.654-1.346 3-3 3H7c-1.654 0-3-1.346-3-3V7c0-1.654 1.346-3 3-3zm5 3a5 5 0 100 10 5 5 0 000-10zm0 2a3 3 0 110 6 3 3 0 010-6zm6.5-.75a1.25 1.25 0 11-2.5 0 1.25 1.25 0 012.5 0z"/>
+                </svg>
               </a>
             </div>
           </div>

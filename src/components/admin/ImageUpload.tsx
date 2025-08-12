@@ -1,5 +1,4 @@
-
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -13,6 +12,7 @@ interface ImageUploadProps {
 
 const ImageUpload = ({ images, onImagesChange }: ImageUploadProps) => {
   const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const uploadImage = async (file: File) => {
     try {
@@ -48,6 +48,8 @@ const ImageUpload = ({ images, onImagesChange }: ImageUploadProps) => {
       const uploadPromises = Array.from(files).map(file => uploadImage(file));
       const uploadedUrls = await Promise.all(uploadPromises);
       onImagesChange([...images, ...uploadedUrls]);
+      // Reset the input to allow re-uploading the same files if needed
+      if (fileInputRef.current) fileInputRef.current.value = '';
     } catch (error) {
       alert('Error al subir las imágenes');
     }
@@ -65,20 +67,20 @@ const ImageUpload = ({ images, onImagesChange }: ImageUploadProps) => {
       {/* Upload Button */}
       <div className="flex items-center gap-4">
         <Input
+          ref={fileInputRef}
           type="file"
           accept="image/*"
           multiple
           onChange={handleFileChange}
           disabled={uploading}
           className="hidden"
-          id="image-upload"
         />
         <Button
           type="button"
           variant="outline"
-          onClick={() => document.getElementById('image-upload')?.click()}
+          onClick={() => fileInputRef.current?.click()}
           disabled={uploading}
-          className="flex items-center gap-2"
+          className="flex items-center gap-2 w-full sm:w-auto"
         >
           <Upload className="w-4 h-4" />
           {uploading ? 'Subiendo...' : 'Subir Imágenes'}
@@ -87,7 +89,7 @@ const ImageUpload = ({ images, onImagesChange }: ImageUploadProps) => {
 
       {/* Image Preview Grid */}
       {images.length > 0 && (
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
           {images.map((image, index) => (
             <div key={index} className="relative group">
               <div className="aspect-square rounded-lg overflow-hidden border border-gray-200">
@@ -101,6 +103,7 @@ const ImageUpload = ({ images, onImagesChange }: ImageUploadProps) => {
                 type="button"
                 onClick={() => removeImage(index)}
                 className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                aria-label="Eliminar imagen"
               >
                 <X className="w-4 h-4" />
               </button>

@@ -84,8 +84,9 @@ const Header = ({ cartItemsCount = 0, onCartClick }: HeaderProps) => {
                     }}
                     role="search"
                     aria-label="Buscar productos"
+                    className="w-full"
                   >
-                    <div className="flex items-stretch gap-2 bg-white rounded-lg p-1">
+                    <div className="flex items-stretch gap-2 bg-white rounded-lg p-1 w-full">
                       <div className="flex items-center px-2 text-[#091024]/70">
                         <Search className="w-4 h-4" />
                       </div>
@@ -94,10 +95,10 @@ const Header = ({ cartItemsCount = 0, onCartClick }: HeaderProps) => {
                         value={query}
                         onChange={(e) => setQuery(e.target.value)}
                         placeholder="Buscar productos..."
-                        className="flex-1 bg-transparent text-[#091024] placeholder-gray-500 focus:outline-none py-2 px-1 text-sm"
+                        className="flex-1 bg-transparent text-[#091024] placeholder-gray-500 focus:outline-none py-2 px-1 text-sm min-w-0"
                       />
                       <SheetClose asChild>
-                        <button type="submit" className="bg-[#3bc8da] hover:bg-[#3fdb70] text-white font-bold px-3 rounded-md">
+                        <button type="submit" className="bg-[#3bc8da] hover:bg-[#3fdb70] text-white font-bold px-3 rounded-md shrink-0">
                           Buscar
                         </button>
                       </SheetClose>

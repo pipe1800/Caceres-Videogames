@@ -4,12 +4,12 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { Label } from '@/components/ui/label';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ImageUpload from './ImageUpload';
 import BulkProductUpload from './BulkProductUpload';
+import CategoriesSelector from './CategoriesSelector';
 
 interface AddProductModalProps {
   isOpen: boolean;
@@ -24,15 +24,40 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
     description: '',
     price: '',
     originalPrice: '',
-    console: '',
-    category: '',
+    categories: '' as any,
     isNew: false,
     isOnSale: false,
     stockCount: '',
     features: ''
   });
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+
+  const getPrimaryConsole = (cats: string[]): string => {
+    const consoles = [
+      'Nintendo Switch',
+      'PlayStation 5',
+      'PlayStation 4',
+      'Xbox Series X',
+      'Xbox One',
+      'PC'
+    ];
+    const found = cats.find(c => consoles.includes(c));
+    return found || '';
+  };
+
+  const getPrimaryCategory = (cats: string[]): string => {
+    const generic = [
+      'PlayStation',
+      'Xbox',
+      'Nintendo Switch',
+      'PC',
+      'Accesorios'
+    ];
+    const found = cats.find(c => generic.includes(c));
+    return found || cats[0] || '';
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,6 +69,11 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
         .map(feature => feature.trim())
         .filter(feature => feature.length > 0);
 
+      const categoriesArray = selectedCategories;
+
+      const primaryConsole = getPrimaryConsole(categoriesArray);
+      const primaryCategory = getPrimaryCategory(categoriesArray);
+
       const { error } = await supabase
         .from('products')
         .insert({
@@ -52,8 +82,9 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
           description: formData.description,
           price: parseFloat(formData.price),
           original_price: formData.originalPrice ? parseFloat(formData.originalPrice) : null,
-          console: formData.console,
-          category: formData.category,
+          console: primaryConsole,
+          category: primaryCategory,
+          categories: categoriesArray,
           is_new: formData.isNew,
           is_on_sale: formData.isOnSale,
           stock_count: parseInt(formData.stockCount),
@@ -76,13 +107,13 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
         description: '',
         price: '',
         originalPrice: '',
-        console: '',
-        category: '',
+        categories: '' as any,
         isNew: false,
         isOnSale: false,
         stockCount: '',
         features: ''
       });
+      setSelectedCategories([]);
       setImageUrls([]);
     } catch (error) {
       console.error('Error adding product:', error);
@@ -94,7 +125,7 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="w-[95vw] sm:max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Agregar Productos</DialogTitle>
           <DialogDescription>
@@ -110,7 +141,7 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
           
           <TabsContent value="individual">
             <form onSubmit={handleSubmit} className="space-y-6">
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="sku">SKU</Label>
                   <Input
@@ -141,7 +172,7 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <Label htmlFor="price">Precio ($)</Label>
                   <Input
@@ -165,39 +196,11 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="console">Consola</Label>
-                  <Select value={formData.console} onValueChange={(value) => setFormData({...formData, console: value})}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Seleccionar consola" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="PlayStation 5">PlayStation 5</SelectItem>
-                      <SelectItem value="PlayStation 4">PlayStation 4</SelectItem>
-                      <SelectItem value="Xbox Series X">Xbox Series X</SelectItem>
-                      <SelectItem value="Xbox One">Xbox One</SelectItem>
-                      <SelectItem value="Nintendo Switch">Nintendo Switch</SelectItem>
-                      <SelectItem value="PC">PC</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="category">Categoría</Label>
-                  <Select value={formData.category} onValueChange={(value) => setFormData({...formData, category: value})}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Seleccionar categoría" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="PlayStation">PlayStation</SelectItem>
-                      <SelectItem value="Xbox">Xbox</SelectItem>
-                      <SelectItem value="Nintendo Switch">Nintendo Switch</SelectItem>
-                      <SelectItem value="PC">PC</SelectItem>
-                      <SelectItem value="Accesorios">Accesorios</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
+              <CategoriesSelector
+                label="Categorías"
+                selected={selectedCategories}
+                onChange={setSelectedCategories}
+              />
 
               <div>
                 <Label htmlFor="stockCount">Cantidad en Stock</Label>
@@ -210,7 +213,7 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
                 />
               </div>
 
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="flex items-center space-x-2">
                   <Switch
                     id="isNew"
@@ -245,11 +248,11 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
                 />
               </div>
 
-              <div className="flex justify-end space-x-2 pt-4">
-                <Button type="button" variant="outline" onClick={onClose}>
+              <div className="flex flex-col-reverse sm:flex-row justify-end gap-2 pt-4">
+                <Button type="button" variant="outline" onClick={onClose} className="w-full sm:w-auto">
                   Cancelar
                 </Button>
-                <Button type="submit" disabled={isLoading}>
+                <Button type="submit" disabled={isLoading} className="w-full sm:w-auto">
                   {isLoading ? 'Agregando...' : 'Agregar Producto'}
                 </Button>
               </div>

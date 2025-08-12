@@ -196,6 +196,17 @@ const Index = () => {
           />
         )}
       </div>
+
+      {/* Lo más vendido - placeholder */}
+      <section className="bg-white/95 backdrop-blur-sm">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+          <div className="text-center mb-8">
+            <h2 className="text-3xl font-black text-[#091024]">Lo más vendido</h2>
+            <p className="text-gray-600">Próximamente</p>
+          </div>
+          {/* Intentionally left empty for now */}
+        </div>
+      </section>
       
       <div className="bg-white/95 backdrop-blur-sm">
         <CompanyInfo />
