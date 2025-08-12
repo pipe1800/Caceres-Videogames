@@ -69,14 +69,78 @@ const Products = () => {
   const fetchProducts = async () => {
     try {
       let query = supabase.from('products').select('*');
+
+      const genericCategories = new Set([
+        'PlayStation',
+        'Xbox',
+        'Nintendo Switch',
+        'PC',
+        'Accesorios',
+        'Consolas',
+      ]);
+
+      const applyConsoleFilter = (q: any, consoleLabel: string) => {
+        // Handle combined labels like "Xbox Series X|Xbox One" by falling back to brand contains
+        if (consoleLabel.includes('Xbox Series X|Xbox One')) {
+          return q.ilike('console', `%Xbox%`);
+        }
+        return q.ilike('console', `%${consoleLabel}%`);
+      };
+
+      const applyKeywordOr = (q: any, keywords: string[]) => {
+        // Build an OR filter across name for multiple keywords
+        const orFilter = keywords
+          .map((k) => `name.ilike.%${k}%`)
+          .join(',');
+        return q.or(orFilter);
+      };
+
       if (categoryFilter) {
-        query = query.eq('category', categoryFilter);
+        // Keep selectedCategory for heading
         setSelectedCategory(categoryFilter);
+
+        const cf = categoryFilter;
+        if (genericCategories.has(cf)) {
+          query = query.eq('category', cf);
+        } else if (/^Juegos de /i.test(cf)) {
+          const consoleLabel = cf.replace(/^Juegos de /i, '').trim();
+          query = applyConsoleFilter(query, consoleLabel);
+          // Optional: try to prefer items that look like games (by name), but not strictly required
+        } else if (/^Controles de /i.test(cf)) {
+          const consoleLabel = cf.replace(/^Controles de /i, '').trim();
+          query = applyConsoleFilter(query, consoleLabel);
+          query = query.eq('category', 'Accesorios');
+          query = applyKeywordOr(query, ['control', 'mando', 'joystick', 'controller']);
+        } else if (/^Memorias de /i.test(cf)) {
+          const consoleLabel = cf.replace(/^Memorias de /i, '').trim();
+          query = applyConsoleFilter(query, consoleLabel);
+          query = query.eq('category', 'Accesorios');
+          query = applyKeywordOr(query, ['memoria', 'memory', 'sd', 'micro sd']);
+        } else if (/^Estuches de /i.test(cf)) {
+          const consoleLabel = cf.replace(/^Estuches de /i, '').trim();
+          query = applyConsoleFilter(query, consoleLabel);
+          query = query.eq('category', 'Accesorios');
+          query = applyKeywordOr(query, ['estuche', 'case', 'funda']);
+        } else if (/^Accesorios de /i.test(cf)) {
+          const consoleLabel = cf.replace(/^Accesorios de /i, '').trim();
+          query = applyConsoleFilter(query, consoleLabel);
+          query = query.eq('category', 'Accesorios');
+        } else if (/^Accesorios iPhone$/i.test(cf)) {
+          query = query.eq('category', 'Accesorios');
+          query = applyKeywordOr(query, ['iphone']);
+        } else if (/^Accesorios Varios$/i.test(cf)) {
+          query = query.eq('category', 'Accesorios');
+        } else {
+          // Fallback: try matching console by label
+          query = query.ilike('console', `%${cf}%`);
+        }
       }
+
       if (search && search.trim().length > 0) {
         // Simple case-insensitive search on name using ilike
         query = query.ilike('name', `%${search.trim()}%`);
       }
+
       const { data, error } = await query.order('created_at', { ascending: false });
       if (error) throw error;
       setProducts(data || []);
@@ -351,53 +415,6 @@ const Products = () => {
               </div>
             </div>
 
-            {/* Features + Specs combined card */}
-            <div className="mt-8 bg-white rounded-2xl p-4 sm:p-6 shadow-lg border border-gray-200">
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-8">
-                {highlightProduct.features && highlightProduct.features.length > 0 && (
-                  <div>
-                    <h2 className="text-lg sm:text-xl font-bold text-[#091024] mb-3 sm:mb-4 flex items-center gap-3">
-                      <Shield className="w-5 h-5 text-[#3bc8da]" />
-                      Características
-                    </h2>
-                    <div className="space-y-2">
-                      {highlightProduct.features.map((feature, index) => (
-                        <div key={index} className="flex items-center gap-3 text-gray-700 bg-gray-50 rounded-xl p-3">
-                          <div className="w-2 h-2 bg-gradient-to-r from-[#3fdb70] to-[#3bc8da] rounded-full flex-shrink-0"></div>
-                          <span className="font-medium text-sm">{feature}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div>
-                  <h2 className="text-lg sm:text-xl font-bold text-[#091024] mb-3 sm:mb-4 flex items-center gap-3">
-                    <Shield className="w-5 h-5 text-[#3bc8da]" />
-                    Información técnica
-                  </h2>
-                  <div className="space-y-2">
-                    <div className="flex items-center gap-3 text-gray-700 bg-gray-50 rounded-xl p-3">
-                      <div className="w-2 h-2 bg-gradient-to-r from-[#3fdb70] to-[#3bc8da] rounded-full flex-shrink-0"></div>
-                      <span className="font-medium text-sm">SKU: {highlightProduct.sku}</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-gray-700 bg-gray-50 rounded-xl p-3">
-                      <div className="w-2 h-2 bg-gradient-to-r from-[#3fdb70] to-[#3bc8da] rounded-full flex-shrink-0"></div>
-                      <span className="font-medium text-sm">Consola: {highlightProduct.console}</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-gray-700 bg-gray-50 rounded-xl p-3">
-                      <div className="w-2 h-2 bg-gradient-to-r from-[#3fdb70] to-[#3bc8da] rounded-full flex-shrink-0"></div>
-                      <span className="font-medium text-sm">Categoría: {highlightProduct.category}</span>
-                    </div>
-                    <div className="flex items-center gap-3 text-gray-700 bg-gray-50 rounded-xl p-3">
-                      <div className="w-2 h-2 bg-gradient-to-r from-[#3fdb70] to-[#3bc8da] rounded-full flex-shrink-0"></div>
-                      <span className="font-medium text-sm">Precio: ${highlightProduct.price.toFixed(2)}</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
             {/* Similar products */}
             {similarProducts.length > 0 && (
               <div className="mt-12">
@@ -405,7 +422,7 @@ const Products = () => {
                   <h2 className="text-3xl font-black text-gray-900 mb-4">Productos Similares</h2>
                   <p className="text-gray-600 text-lg">Otros productos de la categoría {highlightProduct.category}</p>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8 items-stretch">
+                <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-3 gap-y-6 sm:gap-8 items-stretch">
                   {similarProducts.map((sp) => (
                     <div key={sp.id} className="h-full">
                       <ProductCard
@@ -460,7 +477,7 @@ const Products = () => {
                 <p className="text-xl text-gray-600">No se encontraron productos.</p>
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8 items-stretch">
+              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-3 gap-y-6 sm:gap-8 items-stretch">
                 {products.map((p) => (
                   <div key={p.id} className="h-full">
                     <ProductCard

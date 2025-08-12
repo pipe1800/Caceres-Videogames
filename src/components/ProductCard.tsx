@@ -142,7 +142,7 @@ const ProductCard = ({
         <img 
           src={image} 
           alt={name}
-          className="w-full h-40 sm:h-48 object-cover group-hover:scale-110 transition-transform duration-500 cursor-pointer"
+          className="w-full h-36 sm:h-48 object-cover group-hover:scale-110 transition-transform duration-500 cursor-pointer"
           onClick={handleViewDetails}
         />
         {/* Gradient Overlay */}
@@ -176,8 +176,8 @@ const ProductCard = ({
       </div>
 
       {/* Content */}
-      <div className="p-4 sm:p-5 flex flex-col gap-3 flex-1">
-        <h3 className="text-[#091024] font-bold text-sm sm:text-base line-clamp-2 min-h-[2.5rem] sm:min-h-[3rem] group-hover:text-[#3bc8da] transition-colors cursor-pointer" onClick={handleViewDetails}>
+      <div className="p-3 sm:p-5 flex flex-col gap-3 flex-1">
+        <h3 className="text-[#091024] font-bold text-sm sm:text-base line-clamp-2 min-h-[2.25rem] sm:min-h-[3rem] group-hover:text-[#3bc8da] transition-colors cursor-pointer" onClick={handleViewDetails}>
           {name}
         </h3>
         {gameConsole && (
@@ -220,7 +220,7 @@ const ProductCard = ({
             !inStock || stockCount === 0 
               ? 'bg-gray-400 cursor-not-allowed' 
               : 'bg-gradient-to-r from-[#3bc8da] to-[#3fdb70] hover:from-[#3fdb70] hover:to-[#3bc8da]'
-          } text-white py-2.5 sm:py-3 px-4 rounded-xl font-bold transition-all duration-300 flex items-center justify-center gap-2 transform ${
+          } text-white py-2 sm:py-3 px-4 rounded-xl font-bold transition-all duration-300 flex items-center justify-center gap-2 transform ${
             inStock && stockCount > 0 ? 'hover:scale-105' : ''
           } shadow-lg group-hover:shadow-xl`}
         >

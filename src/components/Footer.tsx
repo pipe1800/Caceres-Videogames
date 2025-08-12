@@ -1,12 +1,11 @@
-
 import React from 'react';
-import { MessageCircle, Facebook, MapPin, Phone } from 'lucide-react';
+import { MessageCircle, Facebook, MapPin } from 'lucide-react';
 
 const Footer = () => {
   return (
     <footer className="bg-[#091024] text-white py-12">
       <div className="container mx-auto px-4">
-        <div className="grid md:grid-cols-3 gap-8">
+        <div className="grid md:grid-cols-2 gap-8">
           {/* Company Info */}
           <div>
             <h3 className="text-xl font-bold text-[#3bc8da] mb-4">
@@ -24,18 +23,6 @@ const Footer = () => {
                 <Facebook className="w-6 h-6" />
               </a>
             </div>
-          </div>
-
-          {/* Quick Links */}
-          <div>
-            <h4 className="text-lg font-semibold mb-4">Enlaces Rápidos</h4>
-            <ul className="space-y-2 text-gray-300">
-              <li><a href="#" className="hover:text-[#f3cb49]">Catálogo</a></li>
-              <li><a href="#" className="hover:text-[#f3cb49]">Nintendo Switch</a></li>
-              <li><a href="#" className="hover:text-[#f3cb49]">PlayStation</a></li>
-              <li><a href="#" className="hover:text-[#f3cb49]">Xbox</a></li>
-              <li><a href="#" className="hover:text-[#f3cb49]">Consolas</a></li>
-            </ul>
           </div>
 
           {/* Contact */}
