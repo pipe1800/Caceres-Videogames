@@ -6,6 +6,8 @@ import Navigation from '@/components/Navigation';
 import Footer from '@/components/Footer';
 import { useToast } from '@/hooks/use-toast';
 import { supabase } from '@/integrations/supabase/client';
+import { RadioGroup, RadioGroupItem } from '@/components/ui/radio-group';
+import { Label } from '@/components/ui/label';
 
 interface CartItem {
   id: string;
@@ -24,11 +26,13 @@ const Cart = () => {
   const [stockData, setStockData] = useState<{[key: string]: number}>({});
   const [isRefreshingStock, setIsRefreshingStock] = useState(false);
   const { toast } = useToast();
+  const [deliveryType, setDeliveryType] = useState<'pickup' | 'delivery'>('pickup');
 
   useEffect(() => {
     // Load cart items from localStorage
     const savedCart = localStorage.getItem('cartItems');
     const savedCount = localStorage.getItem('cartItemsCount');
+    const savedDeliveryType = localStorage.getItem('deliveryType');
     
     if (savedCart) {
       const items = JSON.parse(savedCart);
@@ -38,6 +42,9 @@ const Cart = () => {
     }
     if (savedCount) {
       setCartItemsCount(parseInt(savedCount));
+    }
+    if (savedDeliveryType === 'pickup' || savedDeliveryType === 'delivery') {
+      setDeliveryType(savedDeliveryType);
     }
   }, []);
 
@@ -106,6 +113,11 @@ const Cart = () => {
     localStorage.setItem('cartItemsCount', totalCount.toString());
   };
 
+  const updateDeliveryType = (value: 'pickup' | 'delivery') => {
+    setDeliveryType(value);
+    localStorage.setItem('deliveryType', value);
+  };
+  
   const removeItem = (id: string) => {
     const newCartItems = cartItems.filter(item => item.id !== id);
     updateCart(newCartItems);
@@ -144,6 +156,7 @@ const Cart = () => {
     setCartItemsCount(0);
     localStorage.removeItem('cartItems');
     localStorage.removeItem('cartItemsCount');
+    localStorage.removeItem('deliveryType');
     
     toast({
       title: "Carrito vaciado",
@@ -152,8 +165,12 @@ const Cart = () => {
   };
 
   const getTotalPrice = () => {
-    return cartItems.reduce((total, item) => total + (item.price * item.quantity), 0);
+    const subtotal = cartItems.reduce((total, item) => total + (item.price * item.quantity), 0);
+    const shipping = deliveryType === 'delivery' ? 4 : 0;
+    return subtotal + shipping;
   };
+ 
+  const getShippingCost = () => (deliveryType === 'delivery' ? 4 : 0);
 
   const handleCheckout = () => {
     if (cartItems.length === 0) {
@@ -325,14 +342,29 @@ const Cart = () => {
                 <div className="bg-white/95 backdrop-blur-sm rounded-xl sm:rounded-3xl p-4 sm:p-6 shadow-2xl border-2 border-[#3bc8da]/20 lg:sticky lg:top-8">
                   <h2 className="text-lg sm:text-xl font-bold text-[#091024] mb-4 sm:mb-6">Resumen del Pedido</h2>
                   
+                  {/* Delivery Type Selection */}
+                  <div className="mb-6">
+                    <h3 className="text-sm font-semibold text-[#091024] mb-2">Tipo de Entrega</h3>
+                    <RadioGroup value={deliveryType} onValueChange={updateDeliveryType}>
+                      <div className="flex items-center space-x-2 p-3 rounded-lg border border-gray-200">
+                        <RadioGroupItem value="pickup" id="pickup-cart" />
+                        <Label htmlFor="pickup-cart" className="text-sm cursor-pointer">Punto de Entrega (Gratis)</Label>
+                      </div>
+                      <div className="flex items-center space-x-2 p-3 rounded-lg border border-gray-200 mt-2">
+                        <RadioGroupItem value="delivery" id="delivery-cart" />
+                        <Label htmlFor="delivery-cart" className="text-sm cursor-pointer">Envío a Domicilio (+$4.00)</Label>
+                      </div>
+                    </RadioGroup>
+                  </div>
+                  
                   <div className="space-y-4 mb-6">
                     <div className="flex justify-between">
                       <span className="text-gray-600">Productos ({cartItemsCount})</span>
-                      <span className="font-medium text-[#091024]">${getTotalPrice().toFixed(2)}</span>
+                      <span className="font-medium text-[#091024]">${cartItems.reduce((total, item) => total + (item.price * item.quantity), 0).toFixed(2)}</span>
                     </div>
                     <div className="flex justify-between">
                       <span className="text-gray-600">Envío</span>
-                      <span className="font-medium text-[#3fdb70]">Gratis</span>
+                      <span className="font-medium text-[#091024]">{deliveryType === 'delivery' ? '$4.00' : 'Gratis'}</span>
                     </div>
                     <div className="border-t border-gray-200 pt-4">
                       <div className="flex justify-between text-xl font-bold">
@@ -350,7 +382,7 @@ const Cart = () => {
                   </button>
 
                   <p className="text-xs text-gray-500 mt-4 text-center">
-                    Envío gratis en puntos de entrega en todo El Salvador
+                    Envío gratis en puntos de entrega; a domicilio tiene un costo fijo de $4.00
                   </p>
                 </div>
               </div>
