@@ -71,10 +71,21 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
 
       const categoriesArray = selectedCategories;
 
-      const primaryConsole = getPrimaryConsole(categoriesArray);
-      const primaryCategory = getPrimaryCategory(categoriesArray);
+      if (categoriesArray.length === 0) throw new Error('Debe seleccionar al menos una categoría');
 
-      const { error } = await supabase
+      // Fetch category ids by name
+      const { data: catRows, error: catErr } = await supabase
+        .from('categories')
+        .select('id,name')
+        .in('name', categoriesArray);
+      if (catErr) throw catErr;
+      const catIdByName: Record<string,string> = {};
+      (catRows||[]).forEach(c=>{catIdByName[c.name]=c.id});
+
+      const primaryConsole = getPrimaryConsole(categoriesArray);
+
+      // Insert product first (without legacy category columns)
+      const { data: inserted, error: prodErr } = await supabase
         .from('products')
         .insert({
           sku: formData.sku,
@@ -83,8 +94,9 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
           price: parseFloat(formData.price),
           original_price: formData.originalPrice ? parseFloat(formData.originalPrice) : null,
           console: primaryConsole,
-          category: primaryCategory,
-          categories: categoriesArray,
+          // Legacy placeholders until types updated
+          category: '',
+          categories: [],
           is_new: formData.isNew,
           is_on_sale: formData.isOnSale,
           stock_count: parseInt(formData.stockCount),
@@ -93,13 +105,28 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
           features: featuresArray,
           rating: 0,
           review_count: 0
-        });
+        })
+        .select('id')
+        .single();
+      if (prodErr) throw prodErr;
 
-      if (error) throw error;
+      const productId = inserted.id;
+
+      // Build product_categories rows
+      const productCategoriesPayload = categoriesArray
+        .map(name => catIdByName[name])
+        .filter(Boolean)
+        .map(category_id => ({ product_id: productId, category_id }));
+
+      if (productCategoriesPayload.length === 0) throw new Error('No se pudieron resolver los IDs de categorías');
+
+      const { error: pcErr } = await supabase
+        .from('product_categories')
+        .insert(productCategoriesPayload);
+      if (pcErr) throw pcErr;
 
       onProductAdded();
       onClose();
-      
       // Reset form
       setFormData({
         sku: '',
@@ -117,7 +144,7 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
       setImageUrls([]);
     } catch (error) {
       console.error('Error adding product:', error);
-      alert('Error al agregar el producto');
+      alert((error as Error).message || 'Error al agregar el producto');
     } finally {
       setIsLoading(false);
     }

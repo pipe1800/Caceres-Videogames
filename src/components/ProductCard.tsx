@@ -42,12 +42,12 @@ const ProductCard = ({
   if (viewMode === 'list') {
     return (
       <div className="group bg-white rounded-2xl shadow-lg overflow-hidden hover:shadow-2xl transition-all duration-300 border border-gray-200 hover:border-[#3bc8da]/50 flex">
-        {/* Image */}
-        <div className="relative w-48 h-32 overflow-hidden">
+        {/* Image (square) */}
+        <div className="relative w-48 aspect-square overflow-hidden flex-shrink-0">
           <img 
             src={image} 
             alt={name}
-            className="w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
+            className="absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-500"
           />
           <div className="absolute inset-0 bg-gradient-to-t from-black/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
           {/* Badges */}
@@ -137,12 +137,12 @@ const ProductCard = ({
   // Grid view
   return (
     <div className="group relative bg-white rounded-2xl shadow-lg overflow-hidden hover:shadow-2xl transition-all duration-300 border border-gray-200 hover:border-[#3bc8da]/50 h-full flex flex-col">
-      {/* Image Container with Overlay Effects */}
-      <div className="relative overflow-hidden">
+      {/* Image Container with Overlay Effects (square) */}
+      <div className="relative overflow-hidden aspect-square w-full">
         <img 
           src={image} 
           alt={name}
-          className="w-full h-36 sm:h-48 object-cover group-hover:scale-110 transition-transform duration-500 cursor-pointer"
+          className="absolute inset-0 w-full h-full object-cover group-hover:scale-110 transition-transform duration-500 cursor-pointer"
           onClick={handleViewDetails}
         />
         {/* Gradient Overlay */}
@@ -172,7 +172,6 @@ const ProductCard = ({
             </div>
           )}
         </div>
-        {/* Removed top-right console badge */}
       </div>
 
       {/* Content */}

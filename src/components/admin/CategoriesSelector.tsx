@@ -27,6 +27,7 @@ const CategoriesSelector: React.FC<CategoriesSelectorProps> = ({ label = 'Catego
   const [newCategory, setNewCategory] = useState('');
   const [adding, setAdding] = useState(false);
   const [query, setQuery] = useState('');
+  const [parentForNew, setParentForNew] = useState<string>('');
 
   const fetchCategories = async () => {
     const { data, error } = await supabase.from('categories').select('id,name,slug,parent_id').order('name');
@@ -48,9 +49,11 @@ const CategoriesSelector: React.FC<CategoriesSelectorProps> = ({ label = 'Catego
     setAdding(true);
     try {
       const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-      const { error } = await supabase.from('categories').insert({ name, slug });
+      const parent = parentForNew || null;
+      const { error } = await supabase.from('categories').insert({ name, slug, parent_id: parent });
       if (error) throw error;
       setNewCategory('');
+      setParentForNew('');
       await fetchCategories();
       if (!selected.includes(name)) onChange([...selected, name]);
     } catch (e) {
@@ -140,15 +143,30 @@ const CategoriesSelector: React.FC<CategoriesSelectorProps> = ({ label = 'Catego
             onTouchMove={(e) => e.stopPropagation()}
           >
             <div className="p-2 border-b sticky top-0 z-10 bg-popover">
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Nueva categoría"
-                  value={newCategory}
-                  onChange={(e) => setNewCategory(e.target.value)}
-                />
-                <Button type="button" onClick={addCategory} disabled={adding || !newCategory.trim()}>
-                  <Plus className="h-4 w-4" />
-                </Button>
+              <div className="flex flex-col gap-2">
+                <div className="flex gap-2">
+                  <Input
+                    placeholder="Nueva categoría"
+                    value={newCategory}
+                    onChange={(e) => setNewCategory(e.target.value)}
+                  />
+                  <Button type="button" onClick={addCategory} disabled={adding || !newCategory.trim()}>
+                    <Plus className="h-4 w-4" />
+                  </Button>
+                </div>
+                <div className="flex gap-2 items-center">
+                  <select
+                    className="flex-1 border rounded-md px-2 py-1 text-sm bg-background"
+                    value={parentForNew}
+                    onChange={(e) => setParentForNew(e.target.value)}
+                  >
+                    <option value="">(Sin padre)</option>
+                    {allCategories.filter(c=>!c.parent_id).map(c => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                  <span className="text-xs text-gray-500 whitespace-nowrap">Padre</span>
+                </div>
               </div>
             </div>
             <Command shouldFilter={false} className="overflow-visible">

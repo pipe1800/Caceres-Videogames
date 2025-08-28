@@ -50,7 +50,7 @@ export class OrderService {
           total_amount: item.price * item.quantity,
           payment_method: orderData.payment_method,
           wompi_reference: orderData.wompi_reference || null,
-          status: 'pending',
+          status: 'pendiente', // match DB constraint
           payment_status: 'pending'
         };
         
@@ -96,7 +96,7 @@ export class OrderService {
         total_amount: orderData.total_amount,
         payment_method: orderData.payment_method,
         wompi_reference: orderData.wompi_reference || null,
-        status: 'pending',
+        status: 'pendiente', // match DB constraint
         payment_status: 'pending'
       };
 

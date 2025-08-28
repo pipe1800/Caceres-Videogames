@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { LogOut, Package, ShoppingCart, Plus, Edit, Trash2 } from 'lucide-react';
 import EditProductModal from '@/components/admin/EditProductModal';
+import CategoryManager from '@/components/admin/CategoryManager';
 
 // Add order status types and options
 type OrderStatus = 'pendiente' | 'enviada' | 'completada' | 'cancelada';
@@ -253,9 +254,10 @@ const AdminDashboard = () => {
 
         {/* Tabs */}
         <Tabs defaultValue={new URLSearchParams(location.search).get('tab') || 'orders'} className="space-y-4">
-          <TabsList className="w-full grid grid-cols-2 sm:inline-flex">
+          <TabsList className="w-full grid grid-cols-3 sm:inline-flex">
             <TabsTrigger className="w-full" value="orders">Órdenes</TabsTrigger>
             <TabsTrigger className="w-full" value="products">Productos</TabsTrigger>
+            <TabsTrigger className="w-full" value="categories">Categorías</TabsTrigger>
           </TabsList>
 
           <TabsContent value="orders">
@@ -534,6 +536,17 @@ const AdminDashboard = () => {
                     </TableBody>
                   </Table>
                 </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+
+          <TabsContent value="categories">
+            <Card>
+              <CardHeader>
+                <CardTitle>Gestión de Categorías</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <CategoryManager />
               </CardContent>
             </Card>
           </TabsContent>

@@ -2,8 +2,8 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ShoppingCart, Phone, MapPin, Menu, Search } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger, SheetClose } from '@/components/ui/sheet';
-import { categories } from '@/components/Navigation';
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion';
+import { supabase } from '@/integrations/supabase/client';
 
 interface HeaderProps {
   cartItemsCount?: number;
@@ -13,6 +13,31 @@ interface HeaderProps {
 const Header = ({ cartItemsCount = 0, onCartClick }: HeaderProps) => {
   const navigate = useNavigate();
   const [query, setQuery] = React.useState('');
+  const [categories, setCategories] = React.useState<{ name: string; subcategories: string[] }[]>([]);
+
+  React.useEffect(() => {
+    const loadCategories = async () => {
+      const { data, error } = await supabase
+        .from('categories')
+        .select('id,name,slug,parent_id,sort_order,is_active')
+        .eq('is_active', true);
+      if (error || !data) return;
+      // Build hierarchy
+      const parents = data.filter(c => !c.parent_id).sort((a,b)=>(a.sort_order??0)-(b.sort_order??0));
+      const childrenGrouped: Record<string,string[]> = {};
+      data.filter(c => c.parent_id).forEach(c => {
+        const parent = data.find(p => p.id === c.parent_id);
+        if (!parent) return;
+        if (!childrenGrouped[parent.name]) childrenGrouped[parent.name] = [];
+        childrenGrouped[parent.name].push(c.name);
+      });
+      Object.keys(childrenGrouped).forEach(k => {
+        childrenGrouped[k].sort();
+      });
+      setCategories(parents.map(p => ({ name: p.name, subcategories: childrenGrouped[p.name] || [] })));
+    };
+    loadCategories();
+  }, []);
 
   const handleLogoClick = () => {
     navigate('/');
@@ -25,8 +50,10 @@ const Header = ({ cartItemsCount = 0, onCartClick }: HeaderProps) => {
     navigate('/cart');
   };
 
-  const handleCategoryClick = (category: string) => {
-    navigate(`/products?category=${encodeURIComponent(category)}`);
+  const handleCategoryClick = (category: string, isParent?: boolean) => {
+    const params = new URLSearchParams();
+    params.set(isParent ? 'parent' : 'category', category);
+    navigate(`/products?${params.toString()}`);
   };
 
   const consoleCategoryNames = new Set(['Nintendo Switch', 'PlayStation', 'Xbox']);
@@ -116,20 +143,17 @@ const Header = ({ cartItemsCount = 0, onCartClick }: HeaderProps) => {
 
                   {/* Console categories as dropdowns */}
                   <Accordion type="multiple" className="w-full">
-                    {categories.map((cat) => (
+                    {categories.map(cat => (
                       consoleCategoryNames.has(cat.name) && cat.subcategories.length > 0 ? (
                         <AccordionItem key={cat.name} value={cat.name} className="border-none">
-                          <AccordionTrigger className="px-3 py-2 font-medium text-left">
+                          <AccordionTrigger className="px-3 py-2 font-medium text-left" onClick={(e) => { e.preventDefault(); handleCategoryClick(cat.name, true); }}>
                             {cat.name}
                           </AccordionTrigger>
                           <AccordionContent className="pt-0">
                             <div className="pl-2">
-                              {cat.subcategories.map((sub) => (
+                              {cat.subcategories.map(sub => (
                                 <SheetClose asChild key={sub}>
-                                  <button
-                                    className="block w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50 text-sm text-gray-700"
-                                    onClick={() => handleCategoryClick(sub)}
-                                  >
+                                  <button className="block w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50 text-sm text-gray-700" onClick={() => handleCategoryClick(sub, false)}>
                                     {sub}
                                   </button>
                                 </SheetClose>
@@ -142,25 +166,19 @@ const Header = ({ cartItemsCount = 0, onCartClick }: HeaderProps) => {
                   </Accordion>
 
                   {/* Non-console categories keep previous behavior */}
-                  {categories.map((cat) => (
+                  {categories.map(cat => (
                     !consoleCategoryNames.has(cat.name) ? (
                       <div key={cat.name}>
                         <SheetClose asChild>
-                          <button
-                            className="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50 font-medium"
-                            onClick={() => handleCategoryClick(cat.name)}
-                          >
+                          <button className="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50 font-medium" onClick={() => handleCategoryClick(cat.name, true)}>
                             {cat.name}
                           </button>
                         </SheetClose>
                         {cat.subcategories.length > 0 && (
                           <div className="pl-4">
-                            {cat.subcategories.map((sub) => (
+                            {cat.subcategories.map(sub => (
                               <SheetClose asChild key={sub}>
-                                <button
-                                  className="block w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50 text-sm text-gray-700"
-                                  onClick={() => handleCategoryClick(sub)}
-                                >
+                                <button className="block w-full text-left px-3 py-2 rounded-lg hover:bg-gray-50 text-sm text-gray-700" onClick={() => handleCategoryClick(sub)}>
                                   {sub}
                                 </button>
                               </SheetClose>

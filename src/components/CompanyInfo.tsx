@@ -1,4 +1,3 @@
-
 import React from 'react';
 import { MapPin, Phone, Facebook, MessageCircle } from 'lucide-react';
 
@@ -18,13 +17,32 @@ const CompanyInfo = () => {
                 Cáceres Videogames tiene presencia física en alianza con:
               </p>
               <div className="space-y-2">
+                {/* Actualizado: nombre y enlaces a Google Maps */}
                 <div className="flex items-center gap-2">
                   <MapPin className="w-4 h-4 text-[#d93d34]" />
-                  <span>ClickBox Santa Elena</span>
+                  <a
+                    href="https://maps.app.goo.gl/LtssiKDYEX3v9QiMA"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#091024] hover:text-[#3bc8da] transition-colors underline decoration-dotted"
+                  >
+                    ClickBox Plaza Mia Santa Elena
+                  </a>
                 </div>
                 <div className="flex items-center gap-2">
                   <MapPin className="w-4 h-4 text-[#d93d34]" />
-                  <span>ClickBox Plaza Mundo Soyapango</span>
+                  <a
+                    href="https://maps.app.goo.gl/rd56Tn7obbbkKrtq8"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#091024] hover:text-[#3bc8da] transition-colors underline decoration-dotted"
+                  >
+                    ClickBox Plaza Mundo Soyapango
+                  </a>
+                </div>
+                <div className="flex items-center gap-2">
+                  <MapPin className="w-4 h-4 text-[#d93d34]" />
+                  <span>ClickBox Metrocentro San Salvador 11va Etapa (próximamente)</span>
                 </div>
               </div>
             </div>
@@ -55,6 +73,19 @@ const CompanyInfo = () => {
                     className="text-[#091024] hover:text-[#3bc8da] transition-colors"
                   >
                     Facebook Marketplace
+                  </a>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[#f3cb49] w-4 h-4 inline-flex" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" fill="currentColor"><path d="M7 2C4.239 2 2 4.239 2 7v10c0 2.761 2.239 5 5 5h10c2.761 0 5-2.239 5-5V7c0-2.761-2.239-5-5-5H7zm0 2h10c1.654 0 3 1.346 3 3v10c0 1.654-1.346 3-3 3H7c-1.654 0-3-1.346-3-3V7c0-1.654 1.346-3 3-3zm5 3a5 5 0 100 10 5 5 0 000-10zm0 2a3 3 0 110 6 3 3 0 010-6zm6.5-.75a1.25 1.25 0 11-2.5 0 1.25 1.25 0 012.5 0z"/></svg>
+                  </span>
+                  <a
+                    href="https://www.instagram.com/caceres.videogames?igsh=ejZsN2Vsb2syZGhv"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[#091024] hover:text-[#f3cb49] transition-colors"
+                  >
+                    Instagram
                   </a>
                 </div>
               </div>

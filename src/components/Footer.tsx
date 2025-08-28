@@ -55,8 +55,8 @@ const Footer = () => {
               <h5 className="font-medium mb-2">Puntos de Entrega:</h5>
               <p className="text-sm text-gray-400">
                 Metrocentro • Galerías • Torre Futura • Escalón • Santa Tecla • 
-                Santa Elena • La Gran Vía • Antiguo Cuscatlán • 75 Av. Norte • 
-                La Bernal • y más...
+                Plaza Mia Santa Elena • La Gran Vía • Antiguo Cuscatlán • 75 Av. Norte • 
+                La Bernal • Metrocentro 11va Etapa (próx.) • y más...
               </p>
             </div>
           </div>

@@ -4,7 +4,6 @@ import { ArrowLeft, MapPin, CreditCard, Truck, CheckCircle } from 'lucide-react'
 import Header from '@/components/Header';
 import Navigation from '@/components/Navigation';
 import Footer from '@/components/Footer';
-import LocationSelector from '@/components/LocationSelector';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -65,8 +64,7 @@ const Checkout = () => {
     phone: '',
     detailedAddress: '',
     referencePoint: '',
-    mapLocation: '',
-    mapUrl: '',
+    pickupDetails: '' // NUEVO: detalles para punto de entrega
   });
 
   useEffect(() => {
@@ -115,14 +113,6 @@ const Checkout = () => {
     setCustomerData(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleLocationSelect = (location: { lat: number; lng: number; address: string; mapUrl: string }) => {
-    setCustomerData(prev => ({
-      ...prev,
-      mapLocation: location.address,
-      mapUrl: location.mapUrl
-    }));
-  };
-
   const validateForm = () => {
     const { firstName, lastName, email, phone } = customerData;
     
@@ -146,31 +136,22 @@ const Checkout = () => {
       return false;
     }
 
-    if (deliveryType === 'pickup' && !selectedDeliveryPoint) {
-      toast({
-        title: "Punto de entrega requerido",
-        description: "Por favor selecciona un punto de entrega.",
-        variant: "destructive",
-      });
-      return false;
-    }
-
-    if (deliveryType === 'delivery') {
-      const { detailedAddress, referencePoint, mapLocation } = customerData;
-      if (!selectedDepartment || !selectedMunicipality || !detailedAddress.trim() || !referencePoint.trim()) {
+    if (deliveryType === 'pickup') {
+      if (!selectedDeliveryPoint || !customerData.pickupDetails.trim()) {
         toast({
-          title: "Datos de entrega requeridos",
-          description: "Por favor completa todos los datos de entrega obligatorios.",
+          title: "Datos requeridos",
+            description: "Selecciona un punto de entrega y añade los detalles (ej: frente al Starbucks)",
           variant: "destructive",
         });
         return false;
       }
-
-      // Validate that map location is selected for home delivery
-      if (!mapLocation.trim()) {
+    }
+    if (deliveryType === 'delivery') {
+      const { detailedAddress, referencePoint } = customerData;
+      if (!selectedDepartment || !selectedMunicipality || !detailedAddress.trim() || !referencePoint.trim()) {
         toast({
-          title: "Ubicación en mapa requerida",
-          description: "Por favor selecciona la ubicación exacta de entrega en el mapa.",
+          title: "Datos de entrega requeridos",
+          description: "Por favor completa todos los datos de entrega obligatorios.",
           variant: "destructive",
         });
         return false;
@@ -194,7 +175,7 @@ const Checkout = () => {
       // Prepare customer address for delivery
       const customerAddress = deliveryType === 'delivery' 
         ? customerData.detailedAddress
-        : undefined;
+        : `Punto: ${deliveryPoints.find(p => p.id === selectedDeliveryPoint)?.name || selectedDeliveryPoint} - Detalles: ${customerData.pickupDetails}`;
 
       // Create order in database with cart items
       const orderData = {
@@ -402,23 +383,36 @@ const Checkout = () => {
 
               {/* Delivery Point Selection */}
               {deliveryType === 'pickup' && (
-                <div className="mt-6">
-                  <Label>Selecciona tu punto de entrega *</Label>
-                  <Select value={selectedDeliveryPoint} onValueChange={setSelectedDeliveryPoint}>
-                    <SelectTrigger className="mt-2">
-                      <SelectValue placeholder="Elige un punto de entrega" />
-                    </SelectTrigger>
-                    <SelectContent className="bg-white">
-                      {deliveryPoints.map((point) => (
-                        <SelectItem key={point.id} value={point.id}>
-                          <div>
-                            <div className="font-medium">{point.name}</div>
-                            <div className="text-sm text-gray-600">{point.address}</div>
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div className="mt-6 space-y-4">
+                  <div>
+                    <Label>Selecciona tu punto de entrega *</Label>
+                    <Select value={selectedDeliveryPoint} onValueChange={setSelectedDeliveryPoint}>
+                      <SelectTrigger className="mt-2">
+                        <SelectValue placeholder="Elige un punto de entrega" />
+                      </SelectTrigger>
+                      <SelectContent className="bg-white">
+                        {deliveryPoints.map((point) => (
+                          <SelectItem key={point.id} value={point.id}>
+                            <div>
+                              <div className="font-medium">{point.name}</div>
+                              <div className="text-sm text-gray-600">{point.address}</div>
+                            </div>
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div>
+                    <Label htmlFor="pickupDetails">Detalles del Punto de Entrega *</Label>
+                    <Textarea
+                      id="pickupDetails"
+                      value={customerData.pickupDetails}
+                      onChange={(e) => handleInputChange('pickupDetails', e.target.value)}
+                      placeholder="Ej: Frente al Starbucks, entrada principal, junto a la fuente"
+                      className="mt-2"
+                    />
+                    <p className="text-xs text-gray-500 mt-1">Añade una referencia clara para encontrarnos fácilmente.</p>
+                  </div>
                 </div>
               )}
 
@@ -483,12 +477,6 @@ const Checkout = () => {
                       className="mt-2"
                     />
                   </div>
-                  
-                  <LocationSelector
-                    onLocationSelect={handleLocationSelect}
-                    currentLocation={customerData.mapLocation}
-                    isRequired={true}
-                  />
                 </div>
               )}
             </div>

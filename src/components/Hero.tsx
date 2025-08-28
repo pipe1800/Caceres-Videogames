@@ -1,5 +1,6 @@
 import React from 'react';
 import { MapPin, CreditCard, Truck, Shield, Gamepad2, Star, Zap, Search } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 
 type HeroProps = {
   searchQuery?: string;
@@ -8,6 +9,7 @@ type HeroProps = {
 };
 
 const Hero = ({ searchQuery = '', onSearchChange, onSearchSubmit }: HeroProps) => {
+  const navigate = useNavigate();
   return (
     <section className="relative bg-[#091024] text-white py-16 sm:py-20 overflow-hidden">
       {/* Animated Background Elements */}
@@ -135,7 +137,10 @@ const Hero = ({ searchQuery = '', onSearchChange, onSearchSubmit }: HeroProps) =
 
           {/* CTA with Gaming Style */}
           <div className="mt-16">
-            <button className="group relative bg-gradient-to-r from-[#3fdb70] to-[#3bc8da] hover:from-[#3bc8da] hover:to-[#3fdb70] text-[#091024] px-12 py-4 rounded-2xl text-lg font-black transition-all duration-300 transform hover:scale-105 shadow-2xl">
+            <button
+              onClick={() => navigate('/products')}
+              className="group relative bg-gradient-to-r from-[#3fdb70] to-[#3bc8da] hover:from-[#3bc8da] hover:to-[#3fdb70] text-[#091024] px-12 py-4 rounded-2xl text-lg font-black transition-all duration-300 transform hover:scale-105 shadow-2xl"
+            >
               <span className="relative z-10 flex items-center gap-3">
                 <Gamepad2 className="w-6 h-6 group-hover:animate-pulse" />
                 Ver Catálogo Completo

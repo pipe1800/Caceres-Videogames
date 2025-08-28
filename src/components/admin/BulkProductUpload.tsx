@@ -25,13 +25,12 @@ interface ParsedProduct {
   description?: string;
   price: number | null;
   original_price?: number | null;
-  categories: string[];
+  categories: string[]; // names only
   is_new?: boolean;
   is_on_sale?: boolean;
   stock_count?: number;
   features?: string[];
-  console?: string;
-  category?: string;
+  console?: string; // derived from categories or provided
 }
 
 const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
@@ -270,15 +269,23 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
       throw new Error(`Producto con SKU "${product.sku}": debe tener al menos una imagen`);
     }
 
+    // Resolve category IDs by name
+    const { data: catRows, error: catErr } = await supabase
+      .from('categories')
+      .select('id,name')
+      .in('name', product.categories);
+    if (catErr) throw catErr;
+    const catIdByName: Record<string,string> = {};
+    (catRows||[]).forEach(c=>{catIdByName[c.name]=c.id});
+
+    const primaryConsole = (product.console || '').trim() || getPrimaryConsole(product.categories);
+
     // Check if product exists
     const { data: existing } = await supabase
       .from('products')
       .select('id')
       .eq('sku', product.sku)
       .maybeSingle();
-
-    const primaryConsole = (product.console || '').trim() || getPrimaryConsole(product.categories);
-    const primaryCategory = (product.category || '').trim() || getPrimaryCategory(product.categories);
 
     const productData = {
       sku: product.sku,
@@ -287,8 +294,9 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
       price: product.price,
       original_price: product.original_price,
       console: primaryConsole,
-      category: primaryCategory,
-      categories: product.categories,
+      // legacy placeholders to satisfy current types until regeneration
+      category: '',
+      categories: [],
       is_new: product.is_new || false,
       is_on_sale: product.is_on_sale || false,
       stock_count: product.stock_count || 0,
@@ -299,20 +307,41 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
       review_count: 0
     };
 
+    let productId: string;
     if (existing) {
       const { error } = await supabase
         .from('products')
         .update(productData)
-        .eq('sku', product.sku);
+        .eq('sku', product.sku)
+        .select('id')
+        .single();
       if (error) throw error;
-      return 'updated' as const;
+      productId = existing.id;
+      // Clean existing product_categories to replace
+      await supabase.from('product_categories').delete().eq('product_id', productId);
     } else {
-      const { error } = await supabase
+      const { data: inserted, error } = await supabase
         .from('products')
-        .insert(productData);
+        .insert(productData)
+        .select('id')
+        .single();
       if (error) throw error;
-      return 'created' as const;
+      productId = inserted.id;
     }
+
+    const payload = product.categories
+      .map(name => catIdByName[name])
+      .filter(Boolean)
+      .map(category_id => ({ product_id: productId, category_id }));
+
+    if (payload.length === 0) throw new Error(`No se pudieron resolver IDs de categorías para SKU ${product.sku}`);
+
+    const { error: pcErr } = await supabase
+      .from('product_categories')
+      .insert(payload);
+    if (pcErr) throw pcErr;
+
+    return existing ? 'updated' as const : 'created' as const;
   };
 
   const processAll = async () => {

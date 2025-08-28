@@ -1,0 +1,89 @@
+-- WARNING: This schema is for context only and is not meant to be run.
+-- Table order and constraints may not be valid for execution.
+
+CREATE TABLE public.admin_users (
+  email text NOT NULL UNIQUE,
+  password_hash text NOT NULL,
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT admin_users_pkey PRIMARY KEY (id)
+);
+CREATE TABLE public.categories (
+  updated_at timestamp with time zone DEFAULT now(),
+  slug text NOT NULL UNIQUE,
+  name text NOT NULL UNIQUE,
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  parent_id uuid,
+  sort_order integer DEFAULT 0,
+  is_active boolean DEFAULT true,
+  CONSTRAINT categories_pkey PRIMARY KEY (id),
+  CONSTRAINT categories_parent_id_fkey FOREIGN KEY (parent_id) REFERENCES public.categories(id)
+);
+CREATE TABLE public.orders (
+  payment_method text DEFAULT 'pending'::text CHECK (payment_method = ANY (ARRAY['credit-debit'::text, 'cash'::text, 'bank-transfer'::text, 'pending'::text])),
+  payment_status text DEFAULT 'pending'::text CHECK (payment_status = ANY (ARRAY['pending'::text, 'processing'::text, 'completed'::text, 'failed'::text, 'refunded'::text, 'approved'::text, 'declined'::text, 'expired'::text, 'cancelled'::text])),
+  wompi_transaction_id text,
+  wompi_payment_link_id text,
+  wompi_reference text UNIQUE,
+  customer_name text NOT NULL,
+  customer_email text NOT NULL,
+  customer_phone text,
+  customer_address text,
+  product_id uuid NOT NULL,
+  total_amount numeric NOT NULL,
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  quantity integer NOT NULL DEFAULT 1,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  payment_reference text,
+  payment_transaction_id text,
+  status text DEFAULT 'pendiente'::text CHECK (status = ANY (ARRAY['pendiente'::text, 'enviada'::text, 'completada'::text, 'cancelada'::text])),
+  CONSTRAINT orders_pkey PRIMARY KEY (id),
+  CONSTRAINT orders_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(id)
+);
+CREATE TABLE public.payments (
+  order_id uuid NOT NULL,
+  amount numeric NOT NULL,
+  payment_method text NOT NULL,
+  processor_transaction_id text,
+  processor_reference text,
+  processor_payment_link text,
+  processor_response jsonb,
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  currency text DEFAULT 'USD'::text,
+  processor text DEFAULT 'wompi'::text,
+  status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'processing'::text, 'approved'::text, 'declined'::text, 'voided'::text, 'error'::text])),
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  CONSTRAINT payments_pkey PRIMARY KEY (id),
+  CONSTRAINT payments_order_id_fkey FOREIGN KEY (order_id) REFERENCES public.orders(id)
+);
+CREATE TABLE public.product_categories (
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  product_id uuid NOT NULL,
+  category_id uuid NOT NULL,
+  CONSTRAINT product_categories_pkey PRIMARY KEY (product_id, category_id),
+  CONSTRAINT product_categories_product_id_fkey FOREIGN KEY (product_id) REFERENCES public.products(id),
+  CONSTRAINT product_categories_category_id_fkey FOREIGN KEY (category_id) REFERENCES public.categories(id)
+);
+CREATE TABLE public.products (
+  sku text NOT NULL UNIQUE,
+  name text NOT NULL,
+  description text,
+  price numeric NOT NULL,
+  original_price numeric,
+  console text NOT NULL,
+  image_urls ARRAY DEFAULT ARRAY[]::text[],
+  id uuid NOT NULL DEFAULT gen_random_uuid(),
+  is_new boolean DEFAULT false,
+  is_on_sale boolean DEFAULT false,
+  rating numeric DEFAULT 0,
+  review_count integer DEFAULT 0,
+  in_stock boolean DEFAULT true,
+  stock_count integer DEFAULT 0,
+  created_at timestamp with time zone NOT NULL DEFAULT now(),
+  updated_at timestamp with time zone NOT NULL DEFAULT now(),
+  features ARRAY DEFAULT ARRAY[]::text[],
+  CONSTRAINT products_pkey PRIMARY KEY (id)
+);

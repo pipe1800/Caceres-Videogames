@@ -8,24 +8,10 @@ import Footer from '@/components/Footer';
 import { toast } from "@/hooks/use-toast";
 import { ArrowLeft, ShoppingCart, Zap, Crown, Shield, ChevronLeft, ChevronRight, X, Heart } from 'lucide-react';
 import { Dialog, DialogContent, DialogClose } from '@/components/ui/dialog';
+import { Product as DBProduct, Category as DBCategory } from '@/types/supabase';
 
-interface Product {
-  id: string;
-  sku: string;
-  name: string;
-  price: number;
-  original_price?: number;
-  image_urls: string[];
-  console: string;
-  category: string;
-  is_new: boolean;
-  is_on_sale: boolean;
-  rating: number;
-  review_count: number;
-  in_stock: boolean;
-  stock_count: number;
-  description?: string;
-  features?: string[];
+interface Product extends DBProduct {
+  categories?: DBCategory[]; // joined categories enrichment
 }
 
 const Products = () => {
@@ -49,6 +35,8 @@ const Products = () => {
   }, []);
 
   useEffect(() => {
+    // Clear previous products removed to avoid full page flicker; we keep old list until new finishes
+    setIsLoading(true);
     fetchProducts();
   }, [categoryFilter, search]);
 
@@ -68,84 +56,64 @@ const Products = () => {
 
   const fetchProducts = async () => {
     try {
-      let query = supabase.from('products').select('*');
+      setIsLoading(true);
+      const { data: catData, error: catErr } = await supabase
+        .from('categories')
+        .select('id,name,slug,parent_id')
+        .eq('is_active', true);
+      if (catErr) throw catErr;
+      const bySlug: Record<string, any> = {};
+      const byId: Record<string, any> = {};
+      (catData || []).forEach(c => { if (c.slug) bySlug[c.slug] = c; byId[c.id] = c; });
+      const childrenOf = (parentId: string) => (catData || []).filter(c => c.parent_id === parentId);
 
-      const genericCategories = new Set([
-        'PlayStation',
-        'Xbox',
-        'Nintendo Switch',
-        'PC',
-        'Accesorios',
-        'Consolas',
-      ]);
-
-      const applyConsoleFilter = (q: any, consoleLabel: string) => {
-        // Handle combined labels like "Xbox Series X|Xbox One" by falling back to brand contains
-        if (consoleLabel.includes('Xbox Series X|Xbox One')) {
-          return q.ilike('console', `%Xbox%`);
-        }
-        return q.ilike('console', `%${consoleLabel}%`);
-      };
-
-      const applyKeywordOr = (q: any, keywords: string[]) => {
-        // Build an OR filter across name for multiple keywords
-        const orFilter = keywords
-          .map((k) => `name.ilike.%${k}%`)
-          .join(',');
-        return q.or(orFilter);
-      };
+      let targetCategoryIds: Set<string> | null = null;
+      let selectedCategoryName: string | null = null;
 
       if (categoryFilter) {
-        // Keep selectedCategory for heading
-        setSelectedCategory(categoryFilter);
-
-        const cf = categoryFilter;
-        if (genericCategories.has(cf)) {
-          query = query.eq('category', cf);
-        } else if (/^Juegos de /i.test(cf)) {
-          const consoleLabel = cf.replace(/^Juegos de /i, '').trim();
-          query = applyConsoleFilter(query, consoleLabel);
-          // Optional: try to prefer items that look like games (by name), but not strictly required
-        } else if (/^Controles de /i.test(cf)) {
-          const consoleLabel = cf.replace(/^Controles de /i, '').trim();
-          query = applyConsoleFilter(query, consoleLabel);
-          query = query.eq('category', 'Accesorios');
-          query = applyKeywordOr(query, ['control', 'mando', 'joystick', 'controller']);
-        } else if (/^Memorias de /i.test(cf)) {
-          const consoleLabel = cf.replace(/^Memorias de /i, '').trim();
-          query = applyConsoleFilter(query, consoleLabel);
-          query = query.eq('category', 'Accesorios');
-          query = applyKeywordOr(query, ['memoria', 'memory', 'sd', 'micro sd']);
-        } else if (/^Estuches de /i.test(cf)) {
-          const consoleLabel = cf.replace(/^Estuches de /i, '').trim();
-          query = applyConsoleFilter(query, consoleLabel);
-          query = query.eq('category', 'Accesorios');
-          query = applyKeywordOr(query, ['estuche', 'case', 'funda']);
-        } else if (/^Accesorios de /i.test(cf)) {
-          const consoleLabel = cf.replace(/^Accesorios de /i, '').trim();
-          query = applyConsoleFilter(query, consoleLabel);
-          query = query.eq('category', 'Accesorios');
-        } else if (/^Accesorios iPhone$/i.test(cf)) {
-          query = query.eq('category', 'Accesorios');
-          query = applyKeywordOr(query, ['iphone']);
-        } else if (/^Accesorios Varios$/i.test(cf)) {
-          query = query.eq('category', 'Accesorios');
-        } else {
-          // Fallback: try matching console by label
-          query = query.ilike('console', `%${cf}%`);
+        const cat = bySlug[categoryFilter];
+        if (cat) {
+          selectedCategoryName = cat.name;
+          targetCategoryIds = new Set([cat.id]);
+          const kids = childrenOf(cat.id);
+          if (kids.length > 0) kids.forEach(k => targetCategoryIds!.add(k.id));
         }
       }
 
-      if (search && search.trim().length > 0) {
-        // Simple case-insensitive search on name using ilike
-        query = query.ilike('name', `%${search.trim()}%`);
+      let productQuery = supabase.from('products').select('*').order('created_at', { ascending: false });
+      if (search && search.trim()) productQuery = productQuery.ilike('name', `%${search.trim()}%`);
+      const { data: baseProducts, error: baseErr } = await productQuery;
+      if (baseErr) throw baseErr;
+      let filteredProducts = baseProducts || [];
+      if (targetCategoryIds && targetCategoryIds.size > 0) {
+        const productIds = filteredProducts.map(p => p.id);
+        if (productIds.length > 0) {
+          const { data: pcData, error: pcErr } = await supabase
+            .from('product_categories')
+            .select('product_id, category_id')
+            .in('product_id', productIds);
+          if (pcErr) throw pcErr;
+          const categoriesByProduct: Record<string,string[]> = {};
+          (pcData||[]).forEach(r => { (categoriesByProduct[r.product_id] ||= []).push(r.category_id); });
+          filteredProducts = filteredProducts.filter(p => {
+            const cats = categoriesByProduct[p.id] || [];
+            return cats.some(cid => targetCategoryIds!.has(cid));
+          });
+        } else filteredProducts = [];
       }
-
-      const { data, error } = await query.order('created_at', { ascending: false });
-      if (error) throw error;
-      setProducts(data || []);
+      // Strip any legacy string[] categories property before casting
+      filteredProducts = filteredProducts.map(p => {
+        if (Array.isArray((p as any).categories) && (p as any).categories.length && typeof (p as any).categories[0] === 'string') {
+          const clone: any = { ...p };
+          delete clone.categories; // will be enriched later when needed
+          return clone;
+        }
+        return p;
+      });
+      setSelectedCategory(selectedCategoryName);
+      setProducts(filteredProducts as unknown as Product[]);
     } catch (error) {
-      console.error('Error fetching products:', error);
+      console.error('Error fetching products (simplified slug filter):', error);
     } finally {
       setIsLoading(false);
     }
@@ -159,9 +127,24 @@ const Products = () => {
         .eq('id', id)
         .single();
       if (error) throw error;
-      setHighlightProduct(data);
+      const { data: pcData } = await supabase
+        .from('product_categories')
+        .select('category_id')
+        .eq('product_id', id);
+      let joinedCats: DBCategory[] = [];
+      if (pcData && pcData.length > 0) {
+        const catIds = pcData.map(r => r.category_id);
+        const { data: catRows } = await supabase
+          .from('categories')
+          .select('id,name,slug,parent_id,sort_order,is_active,created_at')
+          .in('id', catIds);
+        if (catRows) joinedCats = catRows as DBCategory[];
+      }
+      const enriched: Product = { ...(data as DBProduct), categories: joinedCats };
+      setHighlightProduct(enriched);
       setSelectedImage(0);
-      fetchSimilarProducts(data.category, id);
+      const firstCatId = joinedCats[0]?.id;
+      if (firstCatId) fetchSimilarProductsByCategoryId(firstCatId, id);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (error) {
       console.error('Error fetching product:', error);
@@ -169,19 +152,31 @@ const Products = () => {
     }
   };
 
-  const fetchSimilarProducts = async (category: string, excludeId: string) => {
+  const fetchSimilarProductsByCategoryId = async (categoryId: string, excludeId: string) => {
     try {
-      const { data, error } = await supabase
+      const { data: pcData, error: pcErr } = await supabase
+        .from('product_categories')
+        .select('product_id')
+        .eq('category_id', categoryId);
+      if (pcErr) throw pcErr;
+      const productIds = (pcData || []).map(r => r.product_id).filter(pid => pid !== excludeId);
+      if (productIds.length === 0) { setSimilarProducts([]); return; }
+      const { data: prods, error: prodErr } = await supabase
         .from('products')
         .select('*')
-        .eq('category', category)
-        .neq('id', excludeId)
+        .in('id', productIds)
         .order('created_at', { ascending: false })
         .limit(4);
-      if (error) throw error;
-      setSimilarProducts(data || []);
-    } catch (error) {
-      console.error('Error fetching similar products:', error);
+      if (prodErr) throw prodErr;
+      const normalizedSimilar = (prods || []).map(p => {
+        if (Array.isArray((p as any).categories) && (p as any).categories.length && typeof (p as any).categories[0] === 'string') {
+          const clone: any = { ...p }; delete clone.categories; return clone;
+        }
+        return p;
+      });
+      setSimilarProducts(normalizedSimilar as Product[]);
+    } catch (e) {
+      console.error('Error fetching similar products:', e);
     }
   };
 
@@ -189,14 +184,13 @@ const Products = () => {
     console.log('Cart clicked');
   };
 
-  const handleCategorySelect = (category: string) => {
-    setSelectedCategory(category);
-    const url = new URL(window.location.href);
-    url.searchParams.set('category', category);
-    url.searchParams.delete('productId');
-    if (search) url.searchParams.set('search', search);
-    window.history.pushState({}, '', url.toString());
-    fetchProducts();
+  const handleCategorySelect = (categorySlug: string) => {
+    // Use router searchParams instead of manual history + immediate fetch
+    const next = new URLSearchParams(searchParams.toString());
+    next.set('category', categorySlug);
+    next.delete('productId');
+    if (search) next.set('search', search);
+    setSearchParams(next);
   };
 
   const addToCartWithChecks = (p: Product) => {
@@ -263,13 +257,18 @@ const Products = () => {
     fetchProducts();
   };
 
-  if (isLoading) {
-    return (
-      <div className="min-h-screen bg-white flex items-center justify-center">
-        <div className="text-xl text-gray-900">Cargando productos...</div>
-      </div>
-    );
-  }
+  const handleLike = async (product: Product) => {
+    try {
+      // @ts-ignore - rpc function added via migration not in generated types yet
+      const { data, error } = await supabase.rpc('increment_product_likes', { p_id: product.id });
+      if (error) throw error;
+      setHighlightProduct(prev => prev ? { ...prev, likes_count: (prev.likes_count || 0) + 1 } : prev);
+      toast({ title: '¡Gracias!', description: 'Te gustó este producto.' });
+    } catch (e) {
+      console.error('Error incrementing like:', e);
+      toast({ title: 'Error', description: 'No se pudo registrar tu like.', variant: 'destructive' });
+    }
+  };
 
   return (
     <div className="min-h-screen bg-white">
@@ -326,6 +325,9 @@ const Products = () => {
                   {highlightProduct.description && (
                     <p className="text-gray-700 text-base sm:text-lg leading-relaxed mb-4">{highlightProduct.description}</p>
                   )}
+                  {typeof highlightProduct.likes_count === 'number' && (
+                    <div className="mb-4 text-sm text-gray-600">{highlightProduct.likes_count} likes</div>
+                  )}
                   <div className="mb-4 sm:mb-6">
                     {highlightProduct.original_price && highlightProduct.original_price > highlightProduct.price && (
                       <div className="flex items-center gap-3 sm:gap-4 mb-2">
@@ -354,7 +356,7 @@ const Products = () => {
                     <ShoppingCart className="w-5 h-5 sm:w-6 sm:h-6" />
                     {highlightProduct.in_stock ? 'Agregar al Carrito' : 'Agotado'}
                   </button>
-                  <button className="bg-white border-2 border-[#3bc8da] text-[#3bc8da] hover:bg-[#3bc8da] hover:text-white p-3 sm:p-4 rounded-xl sm:rounded-2xl transition-all duration-300 shadow-lg transform hover:scale-105">
+                  <button className="bg-white border-2 border-[#3bc8da] text-[#3bc8da] hover:bg-[#3bc8da] hover:text-white p-3 sm:p-4 rounded-xl sm:rounded-2xl transition-all duration-300 shadow-lg transform hover:scale-105" onClick={() => highlightProduct && handleLike(highlightProduct)}>
                     <Heart className="w-5 h-5 sm:w-6 sm:h-6" />
                   </button>
                 </div>
@@ -380,11 +382,11 @@ const Products = () => {
               {/* Right column: images */}
               <div className="col-span-1 lg:col-span-8 order-1 lg:order-2 space-y-4">
                 <div className="bg-white rounded-2xl p-4 sm:p-6 lg:p-8 shadow-lg border border-gray-200 overflow-hidden">
-                  <div className="relative rounded-xl overflow-hidden">
+                  <div className="relative rounded-xl overflow-hidden aspect-square w-full">
                     <img
                       src={highlightProduct.image_urls[selectedImage] || ''}
                       alt={highlightProduct.name}
-                      className="w-full h-[300px] sm:h-[400px] lg:h-[500px] object-cover"
+                      className="absolute inset-0 w-full h-full object-cover"
                     />
                     {highlightProduct.is_new && (
                       <div className="absolute top-3 sm:top-4 left-3 sm:left-4 bg-gradient-to-r from-[#3fdb70] to-[#3bc8da] text-white px-3 sm:px-4 py-1.5 sm:py-2 rounded-full text-xs sm:text-sm font-bold flex items-center gap-2 shadow-lg">
@@ -420,7 +422,7 @@ const Products = () => {
               <div className="mt-12">
                 <div className="text-center mb-8">
                   <h2 className="text-3xl font-black text-gray-900 mb-4">Productos Similares</h2>
-                  <p className="text-gray-600 text-lg">Otros productos de la categoría {highlightProduct.category}</p>
+                  <p className="text-gray-600 text-lg">Otros productos de la categoría {highlightProduct.categories?.[0]?.name || ''}</p>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-3 gap-y-6 sm:gap-8 items-stretch">
                   {similarProducts.map((sp) => (
@@ -444,8 +446,10 @@ const Products = () => {
                 <div className="text-center mt-10">
                   <button
                     onClick={() => {
+                      const firstCat = highlightProduct.categories?.[0];
+                      if (!firstCat) return;
                       const url = new URL(window.location.href);
-                      url.searchParams.set('category', highlightProduct.category);
+                      url.searchParams.set('category', firstCat.slug);
                       url.searchParams.delete('productId');
                       window.history.pushState({}, '', url.toString());
                       setHighlightProduct(null);
@@ -454,7 +458,7 @@ const Products = () => {
                     }}
                     className="inline-flex items-center gap-2 bg-white text-[#091024] hover:bg-[#3bc8da] hover:text-white px-6 py-3 rounded-xl font-bold transition-colors border border-[#3bc8da]/30"
                   >
-                    Ver más de {highlightProduct.category}
+                    Ver más de {highlightProduct.categories?.[0]?.name || ''}
                   </button>
                 </div>
               </div>
@@ -472,12 +476,25 @@ const Products = () => {
               <p className="text-xl text-gray-600">Descubre nuestra colección completa de videojuegos</p>
             </div>
 
-            {products.length === 0 ? (
+            {isLoading && (
+              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-3 gap-y-6 sm:gap-8 items-stretch animate-pulse">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="h-full bg-white rounded-2xl border border-gray-200 p-4 flex flex-col gap-4">
+                    <div className="aspect-square w-full bg-gray-200 rounded-xl" />
+                    <div className="h-4 bg-gray-200 rounded w-3/4" />
+                    <div className="h-4 bg-gray-200 rounded w-1/2" />
+                    <div className="mt-auto h-10 bg-gray-200 rounded-lg" />
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {!isLoading && (products.length === 0 ? (
               <div className="text-center py-12">
                 <p className="text-xl text-gray-600">No se encontraron productos.</p>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-3 gap-y-6 sm:gap-8 items-stretch">
+              <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-3 gap-y-6 sm:gap-8 items-stretch transition-opacity duration-300">
                 {products.map((p) => (
                   <div key={p.id} className="h-full">
                     <ProductCard
@@ -496,7 +513,7 @@ const Products = () => {
                   </div>
                 ))}
               </div>
-            )}
+            ))}
           </>
         )}
       </div>
