@@ -9,8 +9,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { LogOut, Package, ShoppingCart, Plus, Edit, Trash2 } from 'lucide-react';
+import { LogOut, Package, ShoppingCart, Plus, Edit, Trash2, LayoutDashboard, FolderTree } from 'lucide-react';
+import { Product as DBProduct, Category as DBCategory } from '@/types/supabase';
 import EditProductModal from '@/components/admin/EditProductModal';
 import CategoryManager from '@/components/admin/CategoryManager';
 
@@ -41,23 +41,9 @@ interface Order {
   quantity: number;
 }
 
-interface Product {
-  id: string;
-  sku: string;
-  name: string;
-  price: number;
-  console: string;
-  category: string;
-  in_stock: boolean;
-  stock_count: number;
-  created_at: string;
-  description?: string;
-  original_price?: number;
-  image_urls: string[];
-  is_new: boolean;
-  is_on_sale: boolean;
-  features: string[];
-  categories?: string[];
+interface Product extends DBProduct {
+  childCategory?: DBCategory | null;
+  parentCategory?: DBCategory | null;
 }
 
 const AdminDashboard = () => {
@@ -71,6 +57,7 @@ const AdminDashboard = () => {
   const [showEditProduct, setShowEditProduct] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [selectedOrder, setSelectedOrder] = useState<any>(null);
+  const [activeView, setActiveView] = useState<'dashboard' | 'orders' | 'products' | 'categories'>('dashboard');
 
   useEffect(() => {
     if (!admin) {
@@ -78,7 +65,13 @@ const AdminDashboard = () => {
       return;
     }
     fetchData();
-  }, [admin, navigate]);
+    
+    // Set initial view from URL
+    const tab = new URLSearchParams(location.search).get('tab');
+    if (tab === 'orders' || tab === 'products' || tab === 'categories') {
+      setActiveView(tab);
+    }
+  }, [admin, navigate, location.search]);
 
   const fetchData = async () => {
     try {
@@ -101,19 +94,44 @@ const AdminDashboard = () => {
         `)
         .order('created_at', { ascending: false });
 
+      const { data: categoriesData, error: categoriesError } = await supabase
+        .from('categories')
+        .select('id,name,slug,parent_id,sort_order,is_active');
+      if (categoriesError) throw categoriesError;
+      const categoryMap = Object.fromEntries(
+        (categoriesData || []).map((c) => [c.id, c as DBCategory])
+      );
+
       // Fetch products
-      const { data: productsData } = await supabase
+      const { data: productsData, error: productsError } = await supabase
         .from('products')
         .select('*')
         .order('created_at', { ascending: false });
+      if (productsError) throw productsError;
+
+      const normalizedProducts = (productsData || []).map((p) => {
+        const base: any = { ...p };
+        if (Array.isArray(base.categories)) delete base.categories;
+        if (typeof base.category === 'string') delete base.category;
+        const child = p.category_id ? categoryMap[p.category_id] || null : null;
+        const parent = p.parent_category_id ? categoryMap[p.parent_category_id] || null : null;
+        return { ...base, childCategory: child, parentCategory: parent } as Product;
+      });
 
       setOrders(((ordersData ?? []) as any));
-      setProducts(productsData || []);
+      setProducts(normalizedProducts);
     } catch (error) {
       console.error('Error fetching data:', error);
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const formatCategoryLabel = (product: Product) => {
+    if (product.parentCategory && product.childCategory && product.parentCategory.id !== product.childCategory.id) {
+      return `${product.parentCategory.name} / ${product.childCategory.name}`;
+    }
+    return product.childCategory?.name || product.parentCategory?.name || product.console;
   };
 
   const updateOrderStatus = async (orderId: string, newStatus: OrderStatus) => {
@@ -158,9 +176,6 @@ const AdminDashboard = () => {
   const deleteProduct = async (productId: string) => {
     if (!confirm('¿Eliminar este producto? Esta acción no se puede deshacer.')) return;
     try {
-      // Remove category links first to avoid FK conflicts
-      await supabase.from('product_categories').delete().eq('product_id', productId);
-
       const { error } = await supabase.from('products').delete().eq('id', productId);
       if (error) {
         // Likely FK violation due to orders referencing this product
@@ -189,11 +204,18 @@ const AdminDashboard = () => {
     );
   }
 
+  const navItems = [
+    { id: 'dashboard' as const, label: 'Dashboard', icon: LayoutDashboard },
+    { id: 'orders' as const, label: 'Órdenes', icon: ShoppingCart },
+    { id: 'products' as const, label: 'Productos', icon: Package },
+    { id: 'categories' as const, label: 'Categorías', icon: FolderTree }
+  ];
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div className="w-full px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             <div>
               <h1 className="text-xl font-semibold text-gray-900">
@@ -213,54 +235,77 @@ const AdminDashboard = () => {
         </div>
       </header>
 
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6 mb-8">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Órdenes Pendientes</CardTitle>
-              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {orders.filter(order => order.status === 'pendiente').length}
-              </div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Productos</CardTitle>
-              <Package className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{products.length}</div>
-            </CardContent>
-          </Card>
-          
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Productos Sin Stock</CardTitle>
-              <Package className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">
-                {products.filter(product => !product.in_stock || product.stock_count === 0).length}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
+      {/* Main Content with Sidebar */}
+      <div className="flex">
+        {/* Left Navigation */}
+        <aside className="w-64 bg-white border-r min-h-[calc(100vh-4rem)] p-4">
+          <nav className="space-y-2">
+            {navItems.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setActiveView(item.id)}
+                  className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-left transition-colors ${
+                    activeView === item.id
+                      ? 'bg-primary text-primary-foreground'
+                      : 'hover:bg-gray-100 text-gray-700'
+                  }`}
+                >
+                  <Icon className="h-5 w-5" />
+                  <span className="font-medium">{item.label}</span>
+                </button>
+              );
+            })}
+          </nav>
+        </aside>
 
-        {/* Tabs */}
-        <Tabs defaultValue={new URLSearchParams(location.search).get('tab') || 'orders'} className="space-y-4">
-          <TabsList className="w-full grid grid-cols-3 sm:inline-flex">
-            <TabsTrigger className="w-full" value="orders">Órdenes</TabsTrigger>
-            <TabsTrigger className="w-full" value="products">Productos</TabsTrigger>
-            <TabsTrigger className="w-full" value="categories">Categorías</TabsTrigger>
-          </TabsList>
+        {/* Main Content Area */}
+        <main className="flex-1 p-6">
+          {/* Dashboard View */}
+          {activeView === 'dashboard' && (
+            <div className="space-y-6">
+              <h2 className="text-2xl font-bold">Dashboard</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">Órdenes Pendientes</CardTitle>
+                    <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">
+                      {orders.filter(order => order.status === 'pendiente').length}
+                    </div>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">Total Productos</CardTitle>
+                    <Package className="h-4 w-4 text-muted-foreground" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">{products.length}</div>
+                  </CardContent>
+                </Card>
+                
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">Productos Sin Stock</CardTitle>
+                    <Package className="h-4 w-4 text-muted-foreground" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">
+                      {products.filter(product => !product.in_stock || product.stock_count === 0).length}
+                    </div>
+                  </CardContent>
+                </Card>
+              </div>
+            </div>
+          )}
 
-          <TabsContent value="orders">
+          {/* Orders View */}
+          {activeView === 'orders' && (
             <Card>
               <CardHeader>
                 <CardTitle>Gestión de Órdenes</CardTitle>
@@ -405,9 +450,10 @@ const AdminDashboard = () => {
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
+          )}
 
-          <TabsContent value="products">
+          {/* Products View */}
+          {activeView === 'products' && (
             <Card>
               <CardHeader className="flex flex-row items-center justify-between">
                 <CardTitle>Gestión de Productos</CardTitle>
@@ -448,7 +494,7 @@ const AdminDashboard = () => {
                         </div>
                         <div>
                           <p className="text-gray-500">Categorías</p>
-                          <p className="font-medium">{product.categories?.length ? product.categories.join(', ') : (product.category || product.console)}</p>
+                          <p className="font-medium">{formatCategoryLabel(product)}</p>
                         </div>
                         <div className="text-right">
                           <p className="text-gray-500">Fecha</p>
@@ -456,25 +502,15 @@ const AdminDashboard = () => {
                         </div>
                       </div>
 
-                      <div className="mt-3 grid grid-cols-2 gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
+                      <div className="mt-3 flex gap-4 justify-end">
+                        <Edit 
+                          className="h-5 w-5 text-blue-600 hover:text-blue-800 cursor-pointer transition-colors" 
                           onClick={() => handleEditProduct(product)}
-                          className="w-full flex items-center justify-center gap-1"
-                        >
-                          <Edit className="h-3 w-3" />
-                          Editar
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="destructive"
+                        />
+                        <Trash2 
+                          className="h-5 w-5 text-red-600 hover:text-red-800 cursor-pointer transition-colors" 
                           onClick={() => deleteProduct(product.id)}
-                          className="w-full flex items-center justify-center gap-1"
-                        >
-                          <Trash2 className="h-3 w-3" />
-                          Eliminar
-                        </Button>
+                        />
                       </div>
                     </div>
                   ))}
@@ -486,7 +522,7 @@ const AdminDashboard = () => {
                     <TableHeader>
                       <TableRow>
                         <TableHead className="hidden lg:table-cell">SKU</TableHead>
-                        <TableHead>Nombre</TableHead>
+                        <TableHead className="w-[20%]">Nombre</TableHead>
                         <TableHead>Precio</TableHead>
                         <TableHead className="hidden xl:table-cell">Categorías</TableHead>
                         <TableHead>Stock</TableHead>
@@ -499,9 +535,9 @@ const AdminDashboard = () => {
                       {products.map((product) => (
                         <TableRow key={product.id}>
                           <TableCell className="font-mono text-sm hidden lg:table-cell">{product.sku}</TableCell>
-                          <TableCell>{product.name}</TableCell>
+                          <TableCell className="w-[20%] max-w-[200px] truncate">{product.name}</TableCell>
                           <TableCell>{'$'}{product.price.toFixed(2)}</TableCell>
-                          <TableCell className="hidden xl:table-cell">{product.categories?.length ? product.categories.join(', ') : (product.category || product.console)}</TableCell>
+                          <TableCell className="hidden xl:table-cell">{formatCategoryLabel(product)}</TableCell>
                           <TableCell>{product.stock_count}</TableCell>
                           <TableCell>
                             <Badge variant={product.in_stock ? 'default' : 'destructive'}>
@@ -511,25 +547,17 @@ const AdminDashboard = () => {
                           <TableCell className="hidden xl:table-cell">
                             {new Date(product.created_at).toLocaleDateString()}
                           </TableCell>
-                          <TableCell className="flex gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => handleEditProduct(product)}
-                              className="flex items-center gap-1"
-                            >
-                              <Edit className="h-3 w-3" />
-                              Editar
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="destructive"
-                              onClick={() => deleteProduct(product.id)}
-                              className="flex items-center gap-1"
-                            >
-                              <Trash2 className="h-3 w-3" />
-                              Eliminar
-                            </Button>
+                          <TableCell>
+                            <div className="flex gap-3">
+                              <Edit 
+                                className="h-4 w-4 text-blue-600 hover:text-blue-800 cursor-pointer transition-colors" 
+                                onClick={() => handleEditProduct(product)}
+                              />
+                              <Trash2 
+                                className="h-4 w-4 text-red-600 hover:text-red-800 cursor-pointer transition-colors" 
+                                onClick={() => deleteProduct(product.id)}
+                              />
+                            </div>
                           </TableCell>
                         </TableRow>
                       ))}
@@ -538,9 +566,10 @@ const AdminDashboard = () => {
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
+          )}
 
-          <TabsContent value="categories">
+          {/* Categories View */}
+          {activeView === 'categories' && (
             <Card>
               <CardHeader>
                 <CardTitle>Gestión de Categorías</CardTitle>
@@ -549,9 +578,9 @@ const AdminDashboard = () => {
                 <CategoryManager />
               </CardContent>
             </Card>
-          </TabsContent>
-        </Tabs>
-      </main>
+          )}
+        </main>
+      </div>
 
       {showEditProduct && selectedProduct && (
         <EditProductModal

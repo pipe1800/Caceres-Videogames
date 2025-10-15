@@ -117,6 +117,35 @@ END$$;
 ALTER FUNCTION "public"."set_updated_at"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."set_product_category_hierarchy"() RETURNS "trigger"
+    LANGUAGE "plpgsql"
+    AS $$
+DECLARE
+  parent uuid;
+BEGIN
+  IF NEW.category_id IS NULL THEN
+    NEW.parent_category_id := NULL;
+    RETURN NEW;
+  END IF;
+
+  SELECT parent_id INTO parent
+  FROM public.categories
+  WHERE id = NEW.category_id;
+
+  IF parent IS NULL THEN
+    NEW.parent_category_id := NEW.category_id;
+  ELSE
+    NEW.parent_category_id := parent;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION "public"."set_product_category_hierarchy"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."update_order_payment_status"("order_id" "uuid", "new_status" "text", "transaction_id" "text") RETURNS "void"
     LANGUAGE "plpgsql"
     AS $$
@@ -320,16 +349,6 @@ CREATE TABLE IF NOT EXISTS "public"."payments" (
 ALTER TABLE "public"."payments" OWNER TO "postgres";
 
 
-CREATE TABLE IF NOT EXISTS "public"."product_categories" (
-    "product_id" "uuid" NOT NULL,
-    "category_id" "uuid" NOT NULL,
-    "created_at" timestamp with time zone DEFAULT "now"() NOT NULL
-);
-
-
-ALTER TABLE "public"."product_categories" OWNER TO "postgres";
-
-
 CREATE TABLE IF NOT EXISTS "public"."products" (
     "id" "uuid" DEFAULT "gen_random_uuid"() NOT NULL,
     "sku" "text" NOT NULL,
@@ -338,6 +357,8 @@ CREATE TABLE IF NOT EXISTS "public"."products" (
     "price" numeric(10,2) NOT NULL,
     "original_price" numeric(10,2),
     "console" "text" NOT NULL,
+  "category_id" "uuid" NOT NULL,
+  "parent_category_id" "uuid" NOT NULL,
     "is_new" boolean DEFAULT false,
     "is_on_sale" boolean DEFAULT false,
     "rating" numeric(2,1) DEFAULT 0,
@@ -399,11 +420,6 @@ ALTER TABLE ONLY "public"."payments"
 
 
 
-ALTER TABLE ONLY "public"."product_categories"
-    ADD CONSTRAINT "product_categories_pkey" PRIMARY KEY ("product_id", "category_id");
-
-
-
 ALTER TABLE ONLY "public"."products"
     ADD CONSTRAINT "products_pkey" PRIMARY KEY ("id");
 
@@ -411,6 +427,16 @@ ALTER TABLE ONLY "public"."products"
 
 ALTER TABLE ONLY "public"."products"
     ADD CONSTRAINT "products_sku_key" UNIQUE ("sku");
+
+
+
+ALTER TABLE ONLY "public"."products"
+  ADD CONSTRAINT "products_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."categories"("id") ON DELETE RESTRICT;
+
+
+
+ALTER TABLE ONLY "public"."products"
+  ADD CONSTRAINT "products_parent_category_id_fkey" FOREIGN KEY ("parent_category_id") REFERENCES "public"."categories"("id") ON DELETE RESTRICT;
 
 
 
@@ -442,19 +468,19 @@ CREATE INDEX "idx_payments_processor_transaction_id" ON "public"."payments" USIN
 
 
 
-CREATE INDEX "idx_product_categories_category_id" ON "public"."product_categories" USING "btree" ("category_id");
-
-
-
-CREATE INDEX "idx_product_categories_product_id" ON "public"."product_categories" USING "btree" ("product_id");
-
-
-
 CREATE INDEX "idx_products_created_at" ON "public"."products" USING "btree" ("created_at" DESC);
 
 
 
 CREATE INDEX "idx_products_name_trgm" ON "public"."products" USING "gin" ("name" "public"."gin_trgm_ops");
+
+
+
+CREATE INDEX "idx_products_category_id" ON "public"."products" USING "btree" ("category_id");
+
+
+
+CREATE INDEX "idx_products_parent_category_id" ON "public"."products" USING "btree" ("parent_category_id");
 
 
 
@@ -471,6 +497,10 @@ CREATE OR REPLACE TRIGGER "trg_categories_updated_at" BEFORE UPDATE ON "public".
 
 
 CREATE OR REPLACE TRIGGER "trg_products_updated_at" BEFORE UPDATE ON "public"."products" FOR EACH ROW EXECUTE FUNCTION "public"."set_updated_at"();
+
+
+
+CREATE OR REPLACE TRIGGER "trg_products_category_parent" BEFORE INSERT OR UPDATE ON "public"."products" FOR EACH ROW EXECUTE FUNCTION "public"."set_product_category_hierarchy"();
 
 
 
@@ -505,16 +535,6 @@ ALTER TABLE ONLY "public"."payments"
 
 
 
-ALTER TABLE ONLY "public"."product_categories"
-    ADD CONSTRAINT "product_categories_category_id_fkey" FOREIGN KEY ("category_id") REFERENCES "public"."categories"("id") ON DELETE CASCADE;
-
-
-
-ALTER TABLE ONLY "public"."product_categories"
-    ADD CONSTRAINT "product_categories_product_id_fkey" FOREIGN KEY ("product_id") REFERENCES "public"."products"("id") ON DELETE CASCADE;
-
-
-
 CREATE POLICY "Admins can manage categories" ON "public"."categories" USING (true);
 
 
@@ -524,10 +544,6 @@ CREATE POLICY "Admins can manage everything" ON "public"."products" USING (true)
 
 
 CREATE POLICY "Admins can manage orders" ON "public"."orders" USING (true);
-
-
-
-CREATE POLICY "Admins can manage product_categories" ON "public"."product_categories" USING (true);
 
 
 
@@ -563,10 +579,6 @@ CREATE POLICY "Anyone can view payments" ON "public"."payments" FOR SELECT TO "a
 
 
 
-CREATE POLICY "Anyone can view product_categories" ON "public"."product_categories" FOR SELECT USING (true);
-
-
-
 CREATE POLICY "Anyone can view products" ON "public"."products" FOR SELECT USING (true);
 
 
@@ -581,9 +593,6 @@ ALTER TABLE "public"."orders" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."payments" ENABLE ROW LEVEL SECURITY;
-
-
-ALTER TABLE "public"."product_categories" ENABLE ROW LEVEL SECURITY;
 
 
 ALTER TABLE "public"."products" ENABLE ROW LEVEL SECURITY;
@@ -672,12 +681,6 @@ GRANT ALL ON TABLE "public"."orders" TO "service_role";
 GRANT ALL ON TABLE "public"."payments" TO "anon";
 GRANT ALL ON TABLE "public"."payments" TO "authenticated";
 GRANT ALL ON TABLE "public"."payments" TO "service_role";
-
-
-
-GRANT ALL ON TABLE "public"."product_categories" TO "anon";
-GRANT ALL ON TABLE "public"."product_categories" TO "authenticated";
-GRANT ALL ON TABLE "public"."product_categories" TO "service_role";
 
 
 

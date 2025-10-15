@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Upload, Download, AlertCircle, CheckCircle, Images, Trash2, Save, FileSpreadsheet } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
@@ -19,18 +20,30 @@ interface ProcessResult {
   created: number;
 }
 
+type CategoryRow = {
+  id: string;
+  name: string;
+  slug: string | null;
+  parent_id: string | null;
+  is_active: boolean | null;
+};
+
 interface ParsedProduct {
   sku: string;
   name: string;
   description?: string;
   price: number | null;
   original_price?: number | null;
-  categories: string[]; // names only
+  categoryName?: string;
+  parentCategoryName?: string;
+  legacyCategories?: string[];
   is_new?: boolean;
   is_on_sale?: boolean;
   stock_count?: number;
   features?: string[];
   console?: string; // derived from categories or provided
+  selectedParentCategoryId?: string;
+  selectedChildCategoryId?: string;
 }
 
 const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
@@ -40,6 +53,51 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
   const [parsedProducts, setParsedProducts] = useState<ParsedProduct[]>([]);
   const [imagesBySku, setImagesBySku] = useState<Record<string, string[]>>({});
   const [expandedSku, setExpandedSku] = useState<string | null>(null);
+  const [categories, setCategories] = useState<CategoryRow[]>([]);
+
+  const normalize = (value: string) => value.trim().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
+
+  const categoriesById = useMemo(() => {
+    const map = new Map<string, CategoryRow>();
+    categories.forEach((c) => map.set(c.id, c));
+    return map;
+  }, [categories]);
+
+  const categoriesByName = useMemo(() => {
+    const map = new Map<string, CategoryRow>();
+    categories.forEach((c) => map.set(normalize(c.name), c));
+    return map;
+  }, [categories, normalize]);
+
+  const parentCategories = useMemo(() => categories.filter((c) => !c.parent_id), [categories]);
+
+  const childCategoriesByParent = useMemo(() => {
+    const map = new Map<string, CategoryRow[]>();
+    categories.forEach((category) => {
+      if (!category.parent_id) return;
+      if (!map.has(category.parent_id)) {
+        map.set(category.parent_id, []);
+      }
+      map.get(category.parent_id)!.push(category);
+    });
+    return map;
+  }, [categories]);
+
+  useEffect(() => {
+    const loadCategories = async () => {
+      const { data, error } = await supabase
+        .from('categories')
+        .select('id,name,slug,parent_id,is_active')
+        .eq('is_active', true)
+        .order('parent_id', { ascending: true })
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true });
+      if (!error && data) {
+        setCategories(data as CategoryRow[]);
+      }
+    };
+    loadCategories();
+  }, []);
 
   const downloadTemplate = () => {
     const headers = [
@@ -49,10 +107,6 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
       'price',
       'original_price',
       'console',
-      'category',
-      'categories_1',
-      'categories_2',
-      'categories_3',
       'is_new',
       'is_on_sale',
       'stock_count',
@@ -60,7 +114,7 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
     ];
     
     const csvContent = headers.join(',') + '\n' +
-      'EXAMPLE-001,"Ejemplo Producto","Descripción del producto",29.99,39.99,"PlayStation 5","Juegos de Acción","PlayStation 5","Juegos",,"true",false,10,"Gráficos impresionantes|Historia envolvente|Multijugador online"';
+      'EXAMPLE-001,"Ejemplo Producto","Descripción del producto",29.99,39.99,"PlayStation 5",true,false,10,"Gráficos impresionantes|Historia envolvente|Multijugador online"';
     
     const blob = new Blob([csvContent], { type: 'text/csv' });
     const url = window.URL.createObjectURL(blob);
@@ -74,15 +128,6 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
   const downloadExcelTemplate = async () => {
     // Dynamic import to ensure browser-friendly build
     const Excel = await import('exceljs');
-
-    // Fetch categories from DB to populate the validation list
-    const { data: categoriesData } = await supabase
-      .from('categories')
-      .select('name')
-      .eq('is_active', true)
-      .order('sort_order', { ascending: true });
-
-    const categoryNames = (categoriesData || []).map(c => c.name);
 
     const consoles = [
       'Nintendo Switch',
@@ -100,56 +145,35 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
     // Write lists
     lists.getCell('A1').value = 'Consolas';
     consoles.forEach((c, i) => lists.getCell(`A${i + 2}`).value = c);
-    lists.getCell('B1').value = 'Categorias';
-    categoryNames.forEach((c, i) => lists.getCell(`B${i + 2}`).value = c);
 
-    // Define named ranges for validation (ExcelJS API uses .add)
     workbook.definedNames.add('ConsolasLista', `Listas!$A$2:$A$${consoles.length + 1}`);
-    workbook.definedNames.add('CategoriasLista', `Listas!$B$2:$B$${categoryNames.length + 1}`);
 
-    // Headers
     const headers = [
-      'sku','name','description','price','original_price','console','category','categories_1','categories_2','categories_3','is_new','is_on_sale','stock_count','features'
+      'sku','name','description','price','original_price','console','is_new','is_on_sale','stock_count','features'
     ];
     sheet.addRow(headers);
     sheet.getRow(1).font = { bold: true };
 
-    // Example row
     sheet.addRow([
       'EXAMPLE-001', 'Ejemplo Producto', 'Descripción del producto', 29.99, 39.99,
-      'PlayStation 5', 'Juegos de Acción', 'PlayStation 5', 'Juegos', '', true, false, 10,
+      'PlayStation 5', true, false, 10,
       'Gráficos impresionantes|Historia envolvente|Multijugador online'
     ]);
 
-    // Column widths
-    const widths = [16,28,36,12,14,16,20,16,16,16,10,12,12,36];
+    const widths = [16,28,36,12,14,18,12,12,12,36];
     widths.forEach((w, i) => sheet.getColumn(i + 1).width = w);
 
-    // Data validation for console (F) and category (G)
-    // @ts-ignore - dataValidations is available at runtime but missing in types
-    (sheet as any).dataValidations.add('F2:F1000', {
-      type: 'list', allowBlank: false, formulae: ['=ConsolasLista']
-    });
-    // @ts-ignore - dataValidations is available at runtime but missing in types
-    (sheet as any).dataValidations.add('G2:G1000', {
-      type: 'list', allowBlank: false, formulae: ['=CategoriasLista']
-    });
+    // Data validations
+    const dv = (sheet as any).dataValidations;
+    dv.add('F2:F1000', { type: 'list', allowBlank: false, formulae: ['=ConsolasLista'] });
 
-    // Data validation for categories_1..3 (H..J)
-    ;['H','I','J'].forEach(col => {
-      // @ts-ignore - dataValidations is available at runtime but missing in types
-      (sheet as any).dataValidations.add(`${col}2:${col}1000`, {
-        type: 'list', allowBlank: true, formulae: ['=CategoriasLista']
-      });
-    });
-
-    // Notes row
     const notesRow = sheet.addRow([
-      'Notas:','Use las listas desplegables para consola y categoría. Para múltiples categorías, use categories_1..3. Exportar como CSV antes de subir.',
-      '', '', '', '', '', '', '', '', '', '', '', ''
+      'Notas:',
+      'Las categorías padre e hija se seleccionan directamente en el panel después de cargar el archivo. Puedes subir este template en formato XLSX o exportarlo como CSV si lo prefieres.',
+      '', '', '', '', '', '', '', ''
     ]);
     notesRow.getCell(2).alignment = { wrapText: true };
-    sheet.mergeCells(`B${notesRow.number}:N${notesRow.number}`);
+    sheet.mergeCells(`B${notesRow.number}:J${notesRow.number}`);
 
     const buf = await workbook.xlsx.writeBuffer();
     const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
@@ -161,58 +185,217 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
     window.URL.revokeObjectURL(url);
   };
 
+  const buildProductFromRecord = (headers: string[], values: string[]): ParsedProduct => {
+    const draft: ParsedProduct & { legacy?: string[] } = {
+      sku: '',
+      name: '',
+      price: null,
+      legacy: []
+    };
+
+    headers.forEach((header, index) => {
+      const rawHeader = (header ?? '').toString().trim();
+      if (!rawHeader) return;
+
+      let value = (values[index] ?? '').toString().trim();
+      value = value.replace(/^"|"$/g, '');
+      const lower = rawHeader.toLowerCase();
+
+      if (lower === 'sku') draft.sku = value;
+      else if (lower === 'name') draft.name = value;
+      else if (lower === 'description') draft.description = value;
+      else if (lower === 'price' || lower === 'original_price') {
+        (draft as any)[lower] = value ? parseFloat(value) : null;
+      } else if (lower === 'stock_count') {
+        draft.stock_count = value ? parseInt(value, 10) : 0;
+      } else if (lower === 'is_new' || lower === 'is_on_sale') {
+        (draft as any)[lower] = value.toLowerCase() === 'true';
+      } else if (lower === 'features') {
+        draft.features = value ? value.split('|').map((item: string) => item.trim()).filter(Boolean) : [];
+      } else if (lower === 'console') {
+        draft.console = value;
+      } else if (lower === 'parent_category' || lower === 'parent_category_name') {
+        draft.parentCategoryName = value;
+      } else if (lower === 'category' || lower === 'category_name') {
+        draft.categoryName = value;
+      } else if (lower === 'categories' || lower === 'categories_1' || lower === 'categories_2' || lower === 'categories_3') {
+        if (value) draft.legacy?.push(value);
+      }
+    });
+
+    const merged = Array.from(new Set([
+      draft.categoryName,
+      draft.parentCategoryName,
+      ...(draft.legacy || [])
+    ].filter(Boolean) as string[]));
+
+    if (!draft.categoryName && merged.length > 0) {
+      draft.categoryName = merged[0];
+    }
+
+    return {
+      sku: draft.sku.trim(),
+      name: draft.name.trim(),
+      description: draft.description,
+      price: draft.price,
+      original_price: draft.original_price,
+      categoryName: draft.categoryName?.trim(),
+      parentCategoryName: draft.parentCategoryName?.trim(),
+      legacyCategories: merged,
+      is_new: draft.is_new,
+      is_on_sale: draft.is_on_sale,
+      stock_count: draft.stock_count,
+      features: draft.features,
+      console: draft.console?.trim()
+    } as ParsedProduct;
+  };
+
   const parseCSV = (text: string): ParsedProduct[] => {
     const lines = text.split('\n').filter(line => line.trim());
+    if (lines.length === 0) return [];
+
     const headers = lines[0].split(',').map(h => h.trim().replace(/"/g, ''));
-    
-    return lines.slice(1).map(line => {
-      const values: string[] = [];
-      let current = '';
-      let inQuotes = false;
-      
-      for (let i = 0; i < line.length; i++) {
-        const char = line[i];
-        if (char === '"') {
-          inQuotes = !inQuotes;
-        } else if (char === ',' && !inQuotes) {
-          values.push(current.trim());
-          current = '';
-        } else {
-          current += char;
+
+    return lines.slice(1)
+      .map((line) => {
+        const values: string[] = [];
+        let current = '';
+        let inQuotes = false;
+
+        for (let i = 0; i < line.length; i++) {
+          const char = line[i];
+          if (char === '"') {
+            inQuotes = !inQuotes;
+          } else if (char === ',' && !inQuotes) {
+            values.push(current.trim());
+            current = '';
+          } else {
+            current += char;
+          }
         }
-      }
-      values.push(current.trim());
-      
-      const obj: any = {};
-      headers.forEach((header, index) => {
-        let value = values[index] || '';
-        value = value.replace(/^"|"$/g, '');
-        
-        if (header === 'price' || header === 'original_price') {
-          obj[header] = value ? parseFloat(value) : null;
-        } else if (header === 'stock_count') {
-          obj[header] = value ? parseInt(value) : 0;
-        } else if (header === 'is_new' || header === 'is_on_sale') {
-          obj[header] = value.toLowerCase() === 'true';
-        } else if (header === 'features') {
-          obj[header] = value ? value.split('|').map((item: string) => item.trim()).filter(Boolean) : [];
-        } else if (header === 'categories') { // legacy single column
-          obj['categories'] = value ? value.split('|').map((item: string) => item.trim()).filter(Boolean) : [];
-        } else if (header === 'categories_1' || header === 'categories_2' || header === 'categories_3') {
-          obj[header] = value;
-        } else {
-          obj[header] = value;
-        }
+        values.push(current.trim());
+
+        return values;
+      })
+      .filter((values) => values.some((value) => value.trim().length > 0))
+      .map((values) => buildProductFromRecord(headers, values));
+  };
+
+  const parseXLSX = async (file: File): Promise<ParsedProduct[]> => {
+    const Excel = await import('exceljs');
+    const workbook = new Excel.Workbook();
+    const buffer = await file.arrayBuffer();
+    await workbook.xlsx.load(buffer);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) return [];
+
+    const headerRow = sheet.getRow(1);
+    const headerValues = Array.isArray(headerRow.values) ? headerRow.values : [];
+    const headers = headerValues
+      .slice(1)
+      .map((cell: any) => {
+        if (cell == null) return '';
+        if (typeof cell === 'object' && 'text' in cell) return String(cell.text || '').trim();
+        return String(cell).trim();
+      }) || [];
+
+    const records: ParsedProduct[] = [];
+    sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
+      if (rowNumber === 1) return;
+  const rowValues = Array.isArray(row.values) ? row.values : [];
+  const rawValues = rowValues.slice(1);
+      const normalizedValues = headers.map((_, index) => {
+        const cell = rawValues[index];
+        if (cell == null) return '';
+        if (typeof cell === 'object' && 'text' in cell) return String(cell.text || '').trim();
+        if (typeof cell === 'number') return Number.isFinite(cell) ? cell.toString() : '';
+        if (typeof cell === 'boolean') return cell ? 'true' : 'false';
+        return String(cell).trim();
       });
 
-      // Merge categories_1..3 into categories array if present
-      const catCols = ['categories_1','categories_2','categories_3'] as const;
-      const catList = catCols.map(c => (obj[c] as string)?.trim()).filter(Boolean);
-      if (catList.length > 0) {
-        obj.categories = [...new Set([...(obj.categories || []), ...catList])];
-      }
-      return obj as ParsedProduct;
+      if (normalizedValues.every((value) => value === '')) return;
+      records.push(buildProductFromRecord(headers, normalizedValues));
     });
+
+    return records;
+  };
+
+  const applyInitialCategorySelections = (products: ParsedProduct[], sourceCategories: CategoryRow[]): ParsedProduct[] => {
+    if (sourceCategories.length === 0) return products;
+
+    const byId = new Map(sourceCategories.map((cat) => [cat.id, cat] as const));
+    const byName = new Map(sourceCategories.map((cat) => [normalize(cat.name), cat] as const));
+
+    return products.map((product) => {
+      let selectedParentCategoryId = product.selectedParentCategoryId;
+      let selectedChildCategoryId = product.selectedChildCategoryId;
+
+      const hintLabels = [
+        product.categoryName,
+        product.parentCategoryName,
+        ...(product.legacyCategories || [])
+      ].filter(Boolean) as string[];
+
+      for (const label of hintLabels) {
+        const candidate = byName.get(normalize(label));
+        if (!candidate) continue;
+
+        if (candidate.parent_id) {
+          selectedChildCategoryId = candidate.id;
+          selectedParentCategoryId = candidate.parent_id;
+          break;
+        }
+
+        if (!candidate.parent_id && !selectedParentCategoryId) {
+          selectedParentCategoryId = candidate.id;
+        }
+      }
+
+      if (selectedChildCategoryId) {
+        const child = byId.get(selectedChildCategoryId);
+        if (!child) {
+          selectedChildCategoryId = undefined;
+        } else if (child.parent_id && child.parent_id !== selectedParentCategoryId) {
+          selectedParentCategoryId = child.parent_id;
+        }
+      }
+
+      if (!selectedParentCategoryId && selectedChildCategoryId) {
+        const child = byId.get(selectedChildCategoryId);
+        if (child) {
+          selectedParentCategoryId = child.parent_id ?? child.id;
+        }
+      }
+
+      if (!selectedChildCategoryId && selectedParentCategoryId) {
+        const children = sourceCategories.filter((cat) => cat.parent_id === selectedParentCategoryId);
+        if (children.length === 1) {
+          selectedChildCategoryId = children[0].id;
+        }
+      }
+
+      return {
+        ...product,
+        selectedParentCategoryId,
+        selectedChildCategoryId
+      };
+    });
+  };
+
+  const collectCategoryLabels = (product: ParsedProduct): string[] => {
+    const set = new Set<string>();
+    if (product.selectedParentCategoryId) {
+      const parent = categoriesById.get(product.selectedParentCategoryId);
+      if (parent) set.add(parent.name);
+    }
+    if (product.selectedChildCategoryId) {
+      const child = categoriesById.get(product.selectedChildCategoryId);
+      if (child) set.add(child.name);
+    }
+    if (product.parentCategoryName) set.add(product.parentCategoryName);
+    if (product.categoryName) set.add(product.categoryName);
+    (product.legacyCategories || []).forEach((label) => set.add(label));
+    return Array.from(set);
   };
 
   const getPrimaryConsole = (cats: string[]): string => {
@@ -228,120 +411,188 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
     return found || '';
   };
 
-  const getPrimaryCategory = (cats: string[]): string => {
-    const generic = [
-      'PlayStation',
-      'Xbox',
-      'Nintendo Switch',
-      'PC',
-      'Accesorios'
-    ];
-    const found = cats.find(c => generic.includes(c));
-    return found || cats[0] || '';
-  };
-
   const handleParse = async () => {
     if (!file) return;
 
     setIsProcessing(true);
     setResult(null);
     try {
-      const text = await file.text();
-      const products = parseCSV(text);
-      setParsedProducts(products);
+      const extension = file.name.split('.').pop()?.toLowerCase();
+      let products: ParsedProduct[] = [];
+
+      if (extension === 'xlsx') {
+        products = await parseXLSX(file);
+      } else {
+        const text = await file.text();
+        products = parseCSV(text);
+      }
+
+      let sourceCategories = categories;
+      if (sourceCategories.length === 0) {
+        const { data } = await supabase
+          .from('categories')
+          .select('id,name,slug,parent_id,is_active')
+          .eq('is_active', true)
+          .order('parent_id', { ascending: true })
+          .order('sort_order', { ascending: true })
+          .order('name', { ascending: true });
+        if (data) {
+          sourceCategories = data as CategoryRow[];
+          setCategories(sourceCategories);
+        }
+      }
+
+      const productsWithSelections = applyInitialCategorySelections(products, sourceCategories);
+
+      setParsedProducts(productsWithSelections);
       // Initialize empty images per SKU
       const imageState: Record<string, string[]> = {};
-      products.forEach(p => { imageState[p.sku] = imagesBySku[p.sku] || []; });
+      productsWithSelections.forEach(p => { imageState[p.sku] = imagesBySku[p.sku] || []; });
       setImagesBySku(imageState);
     } catch (error) {
-      console.error('Error parsing CSV:', error);
-      setResult({ success: 0, errors: ['Error al procesar el archivo CSV'], created: 0, updated: 0 });
+      console.error('Error parsing file:', error);
+      setResult({ success: 0, errors: ['Error al procesar el archivo. Asegúrate de usar un CSV o Excel válido.'], created: 0, updated: 0 });
     } finally {
       setIsProcessing(false);
     }
   };
 
+  const handleParentSelect = (sku: string, parentId: string) => {
+    setParsedProducts((prev) =>
+      prev.map((product) => {
+        if (product.sku !== sku) return product;
+        const childOptions = childCategoriesByParent.get(parentId) || [];
+        const childIsValid = childOptions.some((child) => child.id === product.selectedChildCategoryId);
+        return {
+          ...product,
+          selectedParentCategoryId: parentId,
+          selectedChildCategoryId: childIsValid ? product.selectedChildCategoryId : undefined
+        };
+      })
+    );
+  };
+
+  const handleChildSelect = (sku: string, childId: string) => {
+    setParsedProducts((prev) =>
+      prev.map((product) => {
+        if (product.sku !== sku) return product;
+        const child = categoriesById.get(childId);
+        return {
+          ...product,
+          selectedChildCategoryId: childId,
+          selectedParentCategoryId: child?.parent_id ?? product.selectedParentCategoryId
+        };
+      })
+    );
+  };
+
   const saveProduct = async (product: ParsedProduct, images: string[]) => {
-    if (!product.sku || !product.name || !product.price || !product.categories || product.categories.length === 0) {
+    if (categories.length === 0) {
+      const { data } = await supabase
+        .from('categories')
+        .select('id,name,slug,parent_id,is_active')
+        .eq('is_active', true);
+      if (data) {
+        setCategories(data as CategoryRow[]);
+      }
+    }
+
+    if (!product.sku || !product.name || !product.price) {
       throw new Error(`Producto con SKU "${product.sku || 'sin SKU'}" tiene campos requeridos vacíos`);
     }
     if (!images || images.length === 0) {
       throw new Error(`Producto con SKU "${product.sku}": debe tener al menos una imagen`);
     }
 
-    // Resolve category IDs by name
-    const { data: catRows, error: catErr } = await supabase
-      .from('categories')
-      .select('id,name')
-      .in('name', product.categories);
-    if (catErr) throw catErr;
-    const catIdByName: Record<string,string> = {};
-    (catRows||[]).forEach(c=>{catIdByName[c.name]=c.id});
+    let categoryIdLookup = categoriesById;
 
-    const primaryConsole = (product.console || '').trim() || getPrimaryConsole(product.categories);
+    if (categoryIdLookup.size === 0) {
+      const { data } = await supabase
+        .from('categories')
+        .select('id,name,slug,parent_id,is_active')
+        .eq('is_active', true);
+      if (data) {
+        const fetched = data as CategoryRow[];
+        setCategories(fetched);
+        categoryIdLookup = new Map(fetched.map((c) => [c.id, c]));
+      }
+    }
 
-    // Check if product exists
+    if (!product.selectedParentCategoryId) {
+      throw new Error(`Producto con SKU "${product.sku}": selecciona una categoría padre.`);
+    }
+
+    if (!product.selectedChildCategoryId) {
+      throw new Error(`Producto con SKU "${product.sku}": selecciona una categoría hija.`);
+    }
+
+    const resolvedParent = categoryIdLookup.get(product.selectedParentCategoryId);
+    if (!resolvedParent) {
+      throw new Error(`La categoría padre seleccionada no existe o no está activa para el SKU ${product.sku}.`);
+    }
+
+    const resolvedChild = categoryIdLookup.get(product.selectedChildCategoryId);
+    if (!resolvedChild) {
+      throw new Error(`La categoría hija seleccionada no existe o no está activa para el SKU ${product.sku}.`);
+    }
+
+    if (resolvedChild.parent_id) {
+      if (resolvedChild.parent_id !== resolvedParent.id) {
+        throw new Error(`La categoría hija ${resolvedChild.name} no pertenece a la categoría padre ${resolvedParent.name}.`);
+      }
+    } else if (resolvedChild.id !== resolvedParent.id) {
+      throw new Error(`La categoría seleccionada (${resolvedChild.name}) no coincide con la jerarquía esperada.`);
+    }
+
+    const hints = Array.from(new Set([...collectCategoryLabels(product), resolvedParent.name, resolvedChild.name]));
+
+    const primaryConsole = (product.console || '').trim() || getPrimaryConsole(hints);
+
     const { data: existing } = await supabase
       .from('products')
-      .select('id')
+      .select('id, likes_count, rating, review_count')
       .eq('sku', product.sku)
       .maybeSingle();
 
+    const stockCount = product.stock_count ?? 0;
     const productData = {
       sku: product.sku,
       name: product.name,
       description: product.description || '',
       price: product.price,
-      original_price: product.original_price,
+      original_price: product.original_price ?? null,
       console: primaryConsole,
-      // legacy placeholders to satisfy current types until regeneration
-      category: '',
-      categories: [],
-      is_new: product.is_new || false,
-      is_on_sale: product.is_on_sale || false,
-      stock_count: product.stock_count || 0,
-      in_stock: (product.stock_count || 0) > 0,
+      category_id: resolvedChild.id,
+      parent_category_id: resolvedParent.id,
+      is_new: product.is_new ?? false,
+      is_on_sale: product.is_on_sale ?? false,
+      stock_count: stockCount,
+      in_stock: stockCount > 0,
       image_urls: images,
       features: product.features || [],
-      rating: 0,
-      review_count: 0
+      updated_at: new Date().toISOString()
     };
 
-    let productId: string;
     if (existing) {
       const { error } = await supabase
         .from('products')
         .update(productData)
-        .eq('sku', product.sku)
-        .select('id')
-        .single();
+        .eq('id', existing.id);
       if (error) throw error;
-      productId = existing.id;
-      // Clean existing product_categories to replace
-      await supabase.from('product_categories').delete().eq('product_id', productId);
-    } else {
-      const { data: inserted, error } = await supabase
-        .from('products')
-        .insert(productData)
-        .select('id')
-        .single();
-      if (error) throw error;
-      productId = inserted.id;
+      return 'updated' as const;
     }
 
-    const payload = product.categories
-      .map(name => catIdByName[name])
-      .filter(Boolean)
-      .map(category_id => ({ product_id: productId, category_id }));
+    const { error: insertErr } = await supabase
+      .from('products')
+      .insert({
+        ...productData,
+        likes_count: 0,
+        rating: existing?.rating ?? 0,
+        review_count: existing?.review_count ?? 0
+      });
+    if (insertErr) throw insertErr;
 
-    if (payload.length === 0) throw new Error(`No se pudieron resolver IDs de categorías para SKU ${product.sku}`);
-
-    const { error: pcErr } = await supabase
-      .from('product_categories')
-      .insert(payload);
-    if (pcErr) throw pcErr;
-
-    return existing ? 'updated' as const : 'created' as const;
+    return 'created' as const;
   };
 
   const processAll = async () => {
@@ -355,7 +606,7 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
     for (const product of parsedProducts) {
       const images = imagesBySku[product.sku] || [];
       try {
-        const status = await saveProduct(product, images);
+    const status = await saveProduct(product, images);
         if (status === 'created') created++; else updated++;
       } catch (err) {
         console.error('Error processing product:', err);
@@ -420,14 +671,27 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
           </Button>
         </div>
         
-        <div>
-          <Label htmlFor="csv-file">Archivo CSV</Label>
-          <Input
-            id="csv-file"
-            type="file"
-            accept=".csv"
-            onChange={(e) => setFile(e.target.files?.[0] || null)}
-          />
+        <div className="space-y-2">
+          <Label htmlFor="csv-file" className="text-sm font-medium">Seleccionar Archivo</Label>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <label htmlFor="csv-file" className="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md text-sm font-medium ring-offset-background transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:pointer-events-none disabled:opacity-50 border border-input bg-background hover:bg-accent hover:text-accent-foreground h-10 px-4 py-2 w-full sm:w-auto cursor-pointer">
+              <Upload className="h-4 w-4" />
+              Elegir Archivo CSV o Excel
+            </label>
+            <Input
+              id="csv-file"
+              type="file"
+              accept=".csv,.xlsx"
+              onChange={(e) => setFile(e.target.files?.[0] || null)}
+              className="hidden"
+            />
+          </div>
+          {file && (
+            <p className="text-sm text-green-600 font-medium flex items-center gap-2">
+              <CheckCircle className="h-4 w-4" />
+              Archivo seleccionado: {file.name}
+            </p>
+          )}
         </div>
         
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
@@ -450,6 +714,9 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
         
         {parsedProducts.length > 0 && (
           <div className="space-y-4">
+            <p className="text-sm text-gray-600">
+              Selecciona la categoría padre y luego la categoría hija correspondiente para cada fila antes de guardar.
+            </p>
             <div className="overflow-x-auto border rounded-lg">
               <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
@@ -457,10 +724,9 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SKU</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Nombre</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Precio</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Categorías</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Categoría Padre</th>
+                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Categoría Hija</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Stock</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Consola</th>
-                    <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Categoría</th>
                     <th className="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Imágenes</th>
                     <th className="px-4 py-2" />
                   </tr>
@@ -468,9 +734,9 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
                 <tbody className="bg-white divide-y divide-gray-200">
                   {parsedProducts.map((p) => {
                     const imgs = imagesBySku[p.sku] || [];
-                    const consoleName = getPrimaryConsole(p.categories);
-                    const categoryName = getPrimaryCategory(p.categories);
-                    const hasErrors = !p.sku || !p.name || !p.price || !p.categories?.length;
+                    const childOptions = p.selectedParentCategoryId ? childCategoriesByParent.get(p.selectedParentCategoryId) || [] : [];
+                    const hasCategorySelection = Boolean(p.selectedParentCategoryId && p.selectedChildCategoryId);
+                    const hasErrors = !p.sku || !p.name || !p.price || !hasCategorySelection;
                     const imageError = imgs.length === 0;
                     return (
                       <React.Fragment key={p.sku}>
@@ -478,10 +744,50 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
                           <td className="px-4 py-2 text-sm">{p.sku}</td>
                           <td className="px-4 py-2 text-sm">{p.name}</td>
                           <td className="px-4 py-2 text-sm">{p.price ?? '-'}</td>
-                          <td className="px-4 py-2 text-sm">{p.categories?.join(' | ')}</td>
+                          <td className="px-4 py-2 text-sm min-w-[160px]">
+                            <Select
+                              value={p.selectedParentCategoryId || undefined}
+                              onValueChange={(value) => handleParentSelect(p.sku, value)}
+                            >
+                              <SelectTrigger className={`w-[160px] text-xs ${!p.selectedParentCategoryId ? 'border-red-300' : ''}`}>
+                                <SelectValue placeholder="Categoría padre" />
+                              </SelectTrigger>
+                              <SelectContent className="bg-white max-h-72">
+                                {parentCategories.map((category) => (
+                                  <SelectItem key={category.id} value={category.id}>
+                                    {category.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </td>
+                          <td className="px-4 py-2 text-sm min-w-[160px]">
+                            <Select
+                              value={p.selectedChildCategoryId || undefined}
+                              onValueChange={(value) => handleChildSelect(p.sku, value)}
+                              disabled={!p.selectedParentCategoryId || childOptions.length === 0}
+                            >
+                              <SelectTrigger className={`w-[160px] text-xs ${!p.selectedChildCategoryId ? 'border-red-300' : ''}`}>
+                                <SelectValue
+                                  placeholder={
+                                    !p.selectedParentCategoryId
+                                      ? 'Categoría padre primero'
+                                      : childOptions.length === 0
+                                        ? 'Sin subcategorías'
+                                        : 'Categoría hija'
+                                  }
+                                />
+                              </SelectTrigger>
+                              <SelectContent className="bg-white max-h-72">
+                                {childOptions.map((category) => (
+                                  <SelectItem key={category.id} value={category.id}>
+                                    {category.name}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          </td>
                           <td className="px-4 py-2 text-sm">{p.stock_count ?? 0}</td>
-                          <td className="px-4 py-2 text-sm">{consoleName || '-'}</td>
-                          <td className="px-4 py-2 text-sm">{categoryName || '-'}</td>
                           <td className="px-4 py-2 text-sm">{imgs.length} {imgs.length === 1 ? 'imagen' : 'imágenes'}</td>
                           <td className="px-4 py-2 text-sm whitespace-nowrap flex gap-2">
                             <Button
@@ -516,7 +822,7 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
                         </tr>
                         {expandedSku === p.sku && (
                           <tr>
-                            <td colSpan={9} className="px-4 py-4 bg-gray-50">
+                            <td colSpan={8} className="px-4 py-4 bg-gray-50">
                               <ImageUpload
                                 images={imagesBySku[p.sku] || []}
                                 onImagesChange={(images) => setImagesBySku(prev => ({ ...prev, [p.sku]: images }))}
@@ -558,18 +864,6 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
             )}
           </div>
         )}
-        
-        <div className="text-sm text-gray-600">
-          <p><strong>Instrucciones:</strong></p>
-          <ul className="list-disc pl-5 space-y-1">
-            <li>Descarga el template CSV y úsalo como guía</li>
-            <li>Los campos requeridos son: sku, name, price, categories</li>
-            <li>Para features y categories, separa los valores con "|"</li>
-            <li>Primero carga y previsualiza, luego sube imágenes por producto</li>
-            <li>Debes subir al menos una imagen por producto antes de guardar</li>
-            <li>Puedes guardar cada fila o usar "Procesar todos"</li>
-          </ul>
-        </div>
       </CardContent>
     </Card>
   );

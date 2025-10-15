@@ -11,7 +11,8 @@ import { Dialog, DialogContent, DialogClose } from '@/components/ui/dialog';
 import { Product as DBProduct, Category as DBCategory } from '@/types/supabase';
 
 interface Product extends DBProduct {
-  categories?: DBCategory[]; // joined categories enrichment
+  childCategory?: DBCategory | null;
+  parentCategory?: DBCategory | null;
 }
 
 const Products = () => {
@@ -25,6 +26,9 @@ const Products = () => {
   const [highlightProduct, setHighlightProduct] = useState<Product | null>(null);
   const [similarProducts, setSimilarProducts] = useState<Product[]>([]);
   const [search, setSearch] = useState(searchParams.get('search') || '');
+
+  const highlightCategoryName = highlightProduct?.childCategory?.name || highlightProduct?.parentCategory?.name || '';
+  const highlightCategorySlug = highlightProduct?.childCategory?.slug || highlightProduct?.parentCategory?.slug || '';
 
   const productId = searchParams.get('productId');
   const categoryFilter = searchParams.get('category');
@@ -59,13 +63,18 @@ const Products = () => {
       setIsLoading(true);
       const { data: catData, error: catErr } = await supabase
         .from('categories')
-        .select('id,name,slug,parent_id')
+        .select('id,name,slug,parent_id,sort_order,is_active')
         .eq('is_active', true);
       if (catErr) throw catErr;
-      const bySlug: Record<string, any> = {};
-      const byId: Record<string, any> = {};
-      (catData || []).forEach(c => { if (c.slug) bySlug[c.slug] = c; byId[c.id] = c; });
-      const childrenOf = (parentId: string) => (catData || []).filter(c => c.parent_id === parentId);
+
+      const categories = (catData || []) as DBCategory[];
+      const bySlug: Record<string, DBCategory> = {};
+      const byId: Record<string, DBCategory> = {};
+      categories.forEach((c) => {
+        if (c.slug) bySlug[c.slug] = c;
+        byId[c.id] = c;
+      });
+      const childrenOf = (parentId: string) => categories.filter((c) => c.parent_id === parentId);
 
       let targetCategoryIds: Set<string> | null = null;
       let selectedCategoryName: string | null = null;
@@ -74,44 +83,45 @@ const Products = () => {
         const cat = bySlug[categoryFilter];
         if (cat) {
           selectedCategoryName = cat.name;
-          targetCategoryIds = new Set([cat.id]);
+          targetCategoryIds = new Set<string>([cat.id]);
           const kids = childrenOf(cat.id);
-          if (kids.length > 0) kids.forEach(k => targetCategoryIds!.add(k.id));
+          kids.forEach((k) => targetCategoryIds!.add(k.id));
         }
       }
 
       let productQuery = supabase.from('products').select('*').order('created_at', { ascending: false });
-      if (search && search.trim()) productQuery = productQuery.ilike('name', `%${search.trim()}%`);
+      if (search && search.trim()) {
+        productQuery = productQuery.ilike('name', `%${search.trim()}%`);
+      }
       const { data: baseProducts, error: baseErr } = await productQuery;
       if (baseErr) throw baseErr;
-      let filteredProducts = baseProducts || [];
+
+      let filteredProducts = (baseProducts || []) as DBProduct[];
       if (targetCategoryIds && targetCategoryIds.size > 0) {
-        const productIds = filteredProducts.map(p => p.id);
-        if (productIds.length > 0) {
-          const { data: pcData, error: pcErr } = await supabase
-            .from('product_categories')
-            .select('product_id, category_id')
-            .in('product_id', productIds);
-          if (pcErr) throw pcErr;
-          const categoriesByProduct: Record<string,string[]> = {};
-          (pcData||[]).forEach(r => { (categoriesByProduct[r.product_id] ||= []).push(r.category_id); });
-          filteredProducts = filteredProducts.filter(p => {
-            const cats = categoriesByProduct[p.id] || [];
-            return cats.some(cid => targetCategoryIds!.has(cid));
-          });
-        } else filteredProducts = [];
+        filteredProducts = filteredProducts.filter((p) =>
+          (p.category_id && targetCategoryIds!.has(p.category_id)) ||
+          (p.parent_category_id && targetCategoryIds!.has(p.parent_category_id))
+        );
       }
-      // Strip any legacy string[] categories property before casting
-      filteredProducts = filteredProducts.map(p => {
-        if (Array.isArray((p as any).categories) && (p as any).categories.length && typeof (p as any).categories[0] === 'string') {
+
+      const sanitizedProducts = filteredProducts.map((p) => {
+        if (Array.isArray((p as any).categories)) {
           const clone: any = { ...p };
-          delete clone.categories; // will be enriched later when needed
-          return clone;
+          delete clone.categories;
+          delete clone.category;
+          return clone as DBProduct;
         }
         return p;
       });
+
+      const enrichedProducts = sanitizedProducts.map((p) => ({
+        ...p,
+        childCategory: p.category_id ? byId[p.category_id] || null : null,
+        parentCategory: p.parent_category_id ? byId[p.parent_category_id] || null : null,
+      })) as Product[];
+
       setSelectedCategory(selectedCategoryName);
-      setProducts(filteredProducts as unknown as Product[]);
+      setProducts(enrichedProducts);
     } catch (error) {
       console.error('Error fetching products (simplified slug filter):', error);
     } finally {
@@ -127,24 +137,30 @@ const Products = () => {
         .eq('id', id)
         .single();
       if (error) throw error;
-      const { data: pcData } = await supabase
-        .from('product_categories')
-        .select('category_id')
-        .eq('product_id', id);
-      let joinedCats: DBCategory[] = [];
-      if (pcData && pcData.length > 0) {
-        const catIds = pcData.map(r => r.category_id);
-        const { data: catRows } = await supabase
+
+      const product = data as DBProduct;
+      const categoryIds = [product.category_id, product.parent_category_id].filter(Boolean) as string[];
+      let child: DBCategory | null = null;
+      let parent: DBCategory | null = null;
+
+      if (categoryIds.length > 0) {
+        const { data: catRows, error: catErr } = await supabase
           .from('categories')
           .select('id,name,slug,parent_id,sort_order,is_active,created_at')
-          .in('id', catIds);
-        if (catRows) joinedCats = catRows as DBCategory[];
+          .in('id', categoryIds);
+        if (catErr) throw catErr;
+        (catRows || []).forEach((c) => {
+          if (c.id === product.category_id) child = c as DBCategory;
+          if (c.id === product.parent_category_id) parent = c as DBCategory;
+        });
       }
-      const enriched: Product = { ...(data as DBProduct), categories: joinedCats };
+
+      const enriched: Product = { ...product, childCategory: child, parentCategory: parent };
       setHighlightProduct(enriched);
       setSelectedImage(0);
-      const firstCatId = joinedCats[0]?.id;
-      if (firstCatId) fetchSimilarProductsByCategoryId(firstCatId, id);
+
+      const similarCategoryId = child?.id || parent?.id;
+      if (similarCategoryId) fetchSimilarProductsByCategoryId(similarCategoryId, id);
       window.scrollTo({ top: 0, behavior: 'smooth' });
     } catch (error) {
       console.error('Error fetching product:', error);
@@ -154,27 +170,45 @@ const Products = () => {
 
   const fetchSimilarProductsByCategoryId = async (categoryId: string, excludeId: string) => {
     try {
-      const { data: pcData, error: pcErr } = await supabase
-        .from('product_categories')
-        .select('product_id')
-        .eq('category_id', categoryId);
-      if (pcErr) throw pcErr;
-      const productIds = (pcData || []).map(r => r.product_id).filter(pid => pid !== excludeId);
-      if (productIds.length === 0) { setSimilarProducts([]); return; }
       const { data: prods, error: prodErr } = await supabase
         .from('products')
         .select('*')
-        .in('id', productIds)
+        .eq('category_id', categoryId)
+        .neq('id', excludeId)
         .order('created_at', { ascending: false })
         .limit(4);
       if (prodErr) throw prodErr;
-      const normalizedSimilar = (prods || []).map(p => {
-        if (Array.isArray((p as any).categories) && (p as any).categories.length && typeof (p as any).categories[0] === 'string') {
-          const clone: any = { ...p }; delete clone.categories; return clone;
-        }
-        return p;
+
+      const baseProducts = (prods || []) as DBProduct[];
+      if (baseProducts.length === 0) {
+        setSimilarProducts([]);
+        return;
+      }
+
+      const categoryIds = new Set<string>();
+      baseProducts.forEach((p) => {
+        if (p.category_id) categoryIds.add(p.category_id);
+        if (p.parent_category_id) categoryIds.add(p.parent_category_id);
       });
-      setSimilarProducts(normalizedSimilar as Product[]);
+
+      let categoryMap: Record<string, DBCategory> = {};
+      const idArray = Array.from(categoryIds);
+      if (idArray.length > 0) {
+        const { data: catRows, error: catErr } = await supabase
+          .from('categories')
+          .select('id,name,slug,parent_id,sort_order,is_active,created_at')
+          .in('id', idArray);
+        if (catErr) throw catErr;
+        categoryMap = Object.fromEntries((catRows || []).map((c) => [c.id, c as DBCategory]));
+      }
+
+      const normalizedSimilar = baseProducts.map((p) => ({
+        ...p,
+        childCategory: p.category_id ? categoryMap[p.category_id] || null : null,
+        parentCategory: p.parent_category_id ? categoryMap[p.parent_category_id] || null : null,
+      })) as Product[];
+
+      setSimilarProducts(normalizedSimilar);
     } catch (e) {
       console.error('Error fetching similar products:', e);
     }
@@ -422,7 +456,7 @@ const Products = () => {
               <div className="mt-12">
                 <div className="text-center mb-8">
                   <h2 className="text-3xl font-black text-gray-900 mb-4">Productos Similares</h2>
-                  <p className="text-gray-600 text-lg">Otros productos de la categoría {highlightProduct.categories?.[0]?.name || ''}</p>
+                  <p className="text-gray-600 text-lg">Otros productos de la categoría {highlightCategoryName}</p>
                 </div>
                 <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-x-3 gap-y-6 sm:gap-8 items-stretch">
                   {similarProducts.map((sp) => (
@@ -446,10 +480,9 @@ const Products = () => {
                 <div className="text-center mt-10">
                   <button
                     onClick={() => {
-                      const firstCat = highlightProduct.categories?.[0];
-                      if (!firstCat) return;
+                      if (!highlightCategorySlug) return;
                       const url = new URL(window.location.href);
-                      url.searchParams.set('category', firstCat.slug);
+                      url.searchParams.set('category', highlightCategorySlug);
                       url.searchParams.delete('productId');
                       window.history.pushState({}, '', url.toString());
                       setHighlightProduct(null);
@@ -458,7 +491,7 @@ const Products = () => {
                     }}
                     className="inline-flex items-center gap-2 bg-white text-[#091024] hover:bg-[#3bc8da] hover:text-white px-6 py-3 rounded-xl font-bold transition-colors border border-[#3bc8da]/30"
                   >
-                    Ver más de {highlightProduct.categories?.[0]?.name || ''}
+                    Ver más de {highlightCategoryName}
                   </button>
                 </div>
               </div>

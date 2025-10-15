@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -9,13 +9,19 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import ImageUpload from './ImageUpload';
 import BulkProductUpload from './BulkProductUpload';
-import CategoriesSelector from './CategoriesSelector';
 
 interface AddProductModalProps {
   isOpen: boolean;
   onClose: () => void;
   onProductAdded: () => void;
 }
+
+type CategoryRow = {
+  id: string;
+  name: string;
+  slug: string | null;
+  parent_id: string | null;
+};
 
 const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalProps) => {
   const [formData, setFormData] = useState({
@@ -24,17 +30,64 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
     description: '',
     price: '',
     originalPrice: '',
-    categories: '' as any,
     isNew: false,
     isOnSale: false,
     stockCount: '',
     features: ''
   });
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [categories, setCategories] = useState<CategoryRow[]>([]);
+  const [parentCategoryId, setParentCategoryId] = useState('');
+  const [childCategoryId, setChildCategoryId] = useState('');
 
-  const getPrimaryConsole = (cats: string[]): string => {
+  useEffect(() => {
+    if (!isOpen) return;
+    const loadCategories = async () => {
+      const { data, error } = await supabase
+        .from('categories')
+        .select('id,name,slug,parent_id,is_active')
+        .eq('is_active', true)
+        .order('parent_id', { ascending: true })
+        .order('sort_order', { ascending: true })
+        .order('name', { ascending: true });
+      if (!error && data) {
+        setCategories(data as CategoryRow[]);
+      }
+    };
+    loadCategories();
+  }, [isOpen]);
+
+  const parentOptions = useMemo(
+    () => categories.filter((c) => !c.parent_id),
+    [categories]
+  );
+
+  const childOptions = useMemo(
+    () => categories.filter((c) => c.parent_id === parentCategoryId),
+    [categories, parentCategoryId]
+  );
+
+  const parentCategory = useMemo(
+    () => categories.find((c) => c.id === parentCategoryId) || null,
+    [categories, parentCategoryId]
+  );
+
+  const childCategory = useMemo(
+    () => categories.find((c) => c.id === childCategoryId) || null,
+    [categories, childCategoryId]
+  );
+
+  const handleSelectParent = (value: string) => {
+    setParentCategoryId(value);
+    setChildCategoryId('');
+  };
+
+  const handleSelectChild = (value: string) => {
+    setChildCategoryId(value);
+  };
+
+  const getPrimaryConsole = (labels: string[]): string => {
     const consoles = [
       'Nintendo Switch',
       'PlayStation 5',
@@ -43,20 +96,8 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
       'Xbox One',
       'PC'
     ];
-    const found = cats.find(c => consoles.includes(c));
+    const found = labels.find((label) => consoles.includes(label));
     return found || '';
-  };
-
-  const getPrimaryCategory = (cats: string[]): string => {
-    const generic = [
-      'PlayStation',
-      'Xbox',
-      'Nintendo Switch',
-      'PC',
-      'Accesorios'
-    ];
-    const found = cats.find(c => generic.includes(c));
-    return found || cats[0] || '';
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -64,91 +105,97 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
     setIsLoading(true);
 
     try {
+      if (!childCategoryId) {
+        throw new Error('Selecciona una categoría hija para el producto.');
+      }
+      const resolvedChild = categories.find((c) => c.id === childCategoryId);
+      if (!resolvedChild) throw new Error('No se encontró la categoría hija seleccionada.');
+      const resolvedParentId = resolvedChild.parent_id;
+      if (!resolvedParentId) {
+        throw new Error('La categoría hija seleccionada no tiene una categoría padre.');
+      }
+
+      const resolvedParent = categories.find((c) => c.id === resolvedParentId);
+      if (!resolvedParent) throw new Error('No se encontró la categoría padre correspondiente.');
+
       const featuresArray = formData.features
         .split('\n')
-        .map(feature => feature.trim())
-        .filter(feature => feature.length > 0);
+        .map((feature) => feature.trim())
+        .filter((feature) => feature.length > 0);
 
-      const categoriesArray = selectedCategories;
+      if (imageUrls.length === 0) {
+        throw new Error('Debes subir al menos una imagen.');
+      }
 
-      if (categoriesArray.length === 0) throw new Error('Debe seleccionar al menos una categoría');
+      const priceValue = parseFloat(formData.price || '0');
+      if (Number.isNaN(priceValue) || priceValue <= 0) {
+        throw new Error('Ingresa un precio válido.');
+      }
 
-      // Fetch category ids by name
-      const { data: catRows, error: catErr } = await supabase
-        .from('categories')
-        .select('id,name')
-        .in('name', categoriesArray);
-      if (catErr) throw catErr;
-      const catIdByName: Record<string,string> = {};
-      (catRows||[]).forEach(c=>{catIdByName[c.name]=c.id});
+      const originalPriceValue = formData.originalPrice
+        ? parseFloat(formData.originalPrice)
+        : null;
+      if (formData.originalPrice && Number.isNaN(originalPriceValue || undefined)) {
+        throw new Error('Ingresa un precio original válido.');
+      }
 
-      const primaryConsole = getPrimaryConsole(categoriesArray);
+      const stockValue = parseInt(formData.stockCount || '0', 10);
+      if (Number.isNaN(stockValue) || stockValue < 0) {
+        throw new Error('Ingresa una cantidad de stock válida.');
+      }
 
-      // Insert product first (without legacy category columns)
-      const { data: inserted, error: prodErr } = await supabase
+      const categoryLabels = [resolvedParent.name, resolvedChild.name];
+      const primaryConsole = getPrimaryConsole(categoryLabels);
+
+      const { error } = await supabase
         .from('products')
         .insert({
           sku: formData.sku,
           name: formData.name,
           description: formData.description,
-          price: parseFloat(formData.price),
-          original_price: formData.originalPrice ? parseFloat(formData.originalPrice) : null,
+          price: priceValue,
+          original_price: originalPriceValue,
           console: primaryConsole,
-          // Legacy placeholders until types updated
-          category: '',
-          categories: [],
+          category_id: resolvedChild.id,
+          parent_category_id: resolvedParent.id,
           is_new: formData.isNew,
           is_on_sale: formData.isOnSale,
-          stock_count: parseInt(formData.stockCount),
-          in_stock: parseInt(formData.stockCount) > 0,
+          stock_count: stockValue,
+          in_stock: stockValue > 0,
           image_urls: imageUrls,
           features: featuresArray,
           rating: 0,
-          review_count: 0
-        })
-        .select('id')
-        .single();
-      if (prodErr) throw prodErr;
+          review_count: 0,
+          likes_count: 0
+        });
 
-      const productId = inserted.id;
-
-      // Build product_categories rows
-      const productCategoriesPayload = categoriesArray
-        .map(name => catIdByName[name])
-        .filter(Boolean)
-        .map(category_id => ({ product_id: productId, category_id }));
-
-      if (productCategoriesPayload.length === 0) throw new Error('No se pudieron resolver los IDs de categorías');
-
-      const { error: pcErr } = await supabase
-        .from('product_categories')
-        .insert(productCategoriesPayload);
-      if (pcErr) throw pcErr;
+      if (error) throw error;
 
       onProductAdded();
       onClose();
-      // Reset form
       setFormData({
         sku: '',
         name: '',
         description: '',
         price: '',
         originalPrice: '',
-        categories: '' as any,
         isNew: false,
         isOnSale: false,
         stockCount: '',
         features: ''
       });
-      setSelectedCategories([]);
       setImageUrls([]);
-    } catch (error) {
-      console.error('Error adding product:', error);
-      alert((error as Error).message || 'Error al agregar el producto');
+      setParentCategoryId('');
+      setChildCategoryId('');
+    } catch (err) {
+      console.error('Error adding product:', err);
+      alert(err instanceof Error ? err.message : 'Error al agregar el producto');
     } finally {
       setIsLoading(false);
     }
   };
+
+  const childSelectDisabled = !parentCategoryId;
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -159,13 +206,13 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
             Agrega productos individualmente o en lote usando un archivo CSV
           </DialogDescription>
         </DialogHeader>
-        
+
         <Tabs defaultValue="individual" className="w-full">
           <TabsList className="grid w-full grid-cols-2">
             <TabsTrigger value="individual">Producto Individual</TabsTrigger>
             <TabsTrigger value="bulk">Carga Masiva (CSV)</TabsTrigger>
           </TabsList>
-          
+
           <TabsContent value="individual">
             <form onSubmit={handleSubmit} className="space-y-6">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -174,7 +221,7 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
                   <Input
                     id="sku"
                     value={formData.sku}
-                    onChange={(e) => setFormData({...formData, sku: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, sku: e.target.value })}
                     required
                   />
                 </div>
@@ -183,7 +230,7 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
                   <Input
                     id="name"
                     value={formData.name}
-                    onChange={(e) => setFormData({...formData, name: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                     required
                   />
                 </div>
@@ -194,7 +241,7 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
                 <Textarea
                   id="description"
                   value={formData.description}
-                  onChange={(e) => setFormData({...formData, description: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                   rows={3}
                 />
               </div>
@@ -207,7 +254,7 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
                     type="number"
                     step="0.01"
                     value={formData.price}
-                    onChange={(e) => setFormData({...formData, price: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, price: e.target.value })}
                     required
                   />
                 </div>
@@ -218,16 +265,48 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
                     type="number"
                     step="0.01"
                     value={formData.originalPrice}
-                    onChange={(e) => setFormData({...formData, originalPrice: e.target.value})}
+                    onChange={(e) => setFormData({ ...formData, originalPrice: e.target.value })}
                   />
                 </div>
               </div>
 
-              <CategoriesSelector
-                label="Categorías"
-                selected={selectedCategories}
-                onChange={setSelectedCategories}
-              />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <Label htmlFor="parentCategory">Categoría Padre</Label>
+                  <select
+                    id="parentCategory"
+                    className="w-full border rounded-md px-3 py-2 text-sm"
+                    value={parentCategoryId}
+                    onChange={(e) => handleSelectParent(e.target.value)}
+                    required
+                  >
+                    <option value="">Selecciona una categoría padre</option>
+                    {parentOptions.map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <Label htmlFor="childCategory">Categoría Hija</Label>
+                  <select
+                    id="childCategory"
+                    className="w-full border rounded-md px-3 py-2 text-sm"
+                    value={childCategoryId}
+                    onChange={(e) => handleSelectChild(e.target.value)}
+                    required
+                    disabled={childSelectDisabled}
+                  >
+                    <option value="">{childSelectDisabled ? 'Selecciona primero una categoría padre' : 'Selecciona una categoría hija'}</option>
+                    {childOptions.map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
 
               <div>
                 <Label htmlFor="stockCount">Cantidad en Stock</Label>
@@ -235,7 +314,7 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
                   id="stockCount"
                   type="number"
                   value={formData.stockCount}
-                  onChange={(e) => setFormData({...formData, stockCount: e.target.value})}
+                  onChange={(e) => setFormData({ ...formData, stockCount: e.target.value })}
                   required
                 />
               </div>
@@ -245,7 +324,7 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
                   <Switch
                     id="isNew"
                     checked={formData.isNew}
-                    onCheckedChange={(checked) => setFormData({...formData, isNew: checked})}
+                    onCheckedChange={(checked) => setFormData({ ...formData, isNew: checked })}
                   />
                   <Label htmlFor="isNew">Producto Nuevo</Label>
                 </div>
@@ -253,24 +332,21 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
                   <Switch
                     id="isOnSale"
                     checked={formData.isOnSale}
-                    onCheckedChange={(checked) => setFormData({...formData, isOnSale: checked})}
+                    onCheckedChange={(checked) => setFormData({ ...formData, isOnSale: checked })}
                   />
                   <Label htmlFor="isOnSale">En Oferta</Label>
                 </div>
               </div>
 
-              <ImageUpload 
-                images={imageUrls}
-                onImagesChange={setImageUrls}
-              />
+              <ImageUpload images={imageUrls} onImagesChange={setImageUrls} />
 
               <div>
                 <Label htmlFor="features">Características (una por línea)</Label>
                 <Textarea
                   id="features"
                   value={formData.features}
-                  onChange={(e) => setFormData({...formData, features: e.target.value})}
-                  placeholder="Gráficos impresionantes&#10;Historia envolvente&#10;Multijugador online"
+                  onChange={(e) => setFormData({ ...formData, features: e.target.value })}
+                  placeholder={'Gráficos impresionantes\nHistoria envolvente\nMultijugador online'}
                   rows={3}
                 />
               </div>
@@ -285,7 +361,7 @@ const AddProductModal = ({ isOpen, onClose, onProductAdded }: AddProductModalPro
               </div>
             </form>
           </TabsContent>
-          
+
           <TabsContent value="bulk">
             <BulkProductUpload onProductsProcessed={onProductAdded} />
           </TabsContent>

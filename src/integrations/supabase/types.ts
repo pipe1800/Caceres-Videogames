@@ -82,7 +82,7 @@ export type Database = {
       }
       products: {
         Row: {
-          category: string
+          category_id: string
           console: string
           created_at: string
           description: string | null
@@ -92,18 +92,19 @@ export type Database = {
           in_stock: boolean | null
           is_new: boolean | null
           is_on_sale: boolean | null
+          likes_count: number
           name: string
           original_price: number | null
+          parent_category_id: string
           price: number
           rating: number | null
           review_count: number | null
           sku: string
           stock_count: number | null
           updated_at: string
-          categories: string[] | null
         }
         Insert: {
-          category: string
+          category_id: string
           console: string
           created_at?: string
           description?: string | null
@@ -113,18 +114,19 @@ export type Database = {
           in_stock?: boolean | null
           is_new?: boolean | null
           is_on_sale?: boolean | null
+          likes_count?: number
           name: string
           original_price?: number | null
+          parent_category_id?: string
           price: number
           rating?: number | null
           review_count?: number | null
           sku: string
           stock_count?: number | null
           updated_at?: string
-          categories?: string[] | null
         }
         Update: {
-          category?: string
+          category_id?: string
           console?: string
           created_at?: string
           description?: string | null
@@ -134,17 +136,33 @@ export type Database = {
           in_stock?: boolean | null
           is_new?: boolean | null
           is_on_sale?: boolean | null
+          likes_count?: number
           name?: string
           original_price?: number | null
+          parent_category_id?: string
           price?: number
           rating?: number | null
           review_count?: number | null
           sku?: string
           stock_count?: number | null
           updated_at?: string
-          categories?: string[] | null
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "products_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "products_parent_category_id_fkey"
+            columns: ["parent_category_id"]
+            isOneToOne: false
+            referencedRelation: "categories"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       categories: {
         Row: {
@@ -178,36 +196,6 @@ export type Database = {
           {
             foreignKeyName: "categories_parent_id_fkey"
             columns: ["parent_id"]
-            isOneToOne: false
-            referencedRelation: "categories"
-            referencedColumns: ["id"]
-          }
-        ]
-      }
-      product_categories: {
-        Row: {
-          product_id: string
-          category_id: string
-        }
-        Insert: {
-          product_id: string
-          category_id: string
-        }
-        Update: {
-          product_id?: string
-          category_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "product_categories_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "products"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "product_categories_category_id_fkey"
-            columns: ["category_id"]
             isOneToOne: false
             referencedRelation: "categories"
             referencedColumns: ["id"]

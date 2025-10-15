@@ -51,6 +51,8 @@ export interface Database {
           price: number;
           original_price: number | null;
           console: string;
+          category_id: string;
+          parent_category_id: string;
           features: string[] | null;
           image_urls: string[] | null;
           is_new: boolean | null;
@@ -71,6 +73,8 @@ export interface Database {
           price: number;
           original_price?: number | null;
           console: string;
+          category_id: string;
+          parent_category_id?: string;
           features?: string[] | null;
           image_urls?: string[] | null;
           is_new?: boolean | null;
@@ -84,19 +88,6 @@ export interface Database {
           likes_count?: number; // added
         };
         Update: Partial<Database['public']['Tables']['products']['Insert']>;
-      };
-      product_categories: {
-        Row: {
-          product_id: string;
-          category_id: string;
-          created_at?: string;
-        };
-        Insert: {
-          product_id: string;
-          category_id: string;
-          created_at?: string;
-        };
-        Update: Partial<Database['public']['Tables']['product_categories']['Insert']>;
       };
       orders: {
         Row: {
@@ -184,4 +175,3 @@ export interface Database {
 export type PublicTables = Database['public']['Tables'];
 export type Category = PublicTables['categories']['Row'];
 export type Product = PublicTables['products']['Row'];
-export type ProductCategory = PublicTables['product_categories']['Row'];

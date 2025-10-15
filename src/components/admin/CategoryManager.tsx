@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { ChevronDown, ChevronRight, Plus, RefreshCcw, Trash2, EyeOff, Eye, AlertTriangle } from 'lucide-react';
+import { ChevronDown, ChevronRight, Plus, RefreshCcw, Trash2, EyeOff, Eye, AlertTriangle, Pencil } from 'lucide-react';
 
 interface CategoryRow {
   id: string; name: string; slug: string | null; parent_id: string | null; is_active: boolean | null; created_at: string; sort_order: number | null;
@@ -24,6 +24,10 @@ const CategoryManager: React.FC = () => {
   const [confirmDelete, setConfirmDelete] = useState<EnrichedCategory | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [editingCategory, setEditingCategory] = useState<EnrichedCategory | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editParent, setEditParent] = useState<string>('');
+  const [updating, setUpdating] = useState(false);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -36,18 +40,40 @@ const CategoryManager: React.FC = () => {
         .order('name', { ascending: true });
       if (error) throw error;
       const catList: CategoryRow[] = cats || [];
-      const { data: pcRows, error: pcErr } = await supabase
-        .from('product_categories')
-        .select('product_id,category_id');
-      if (pcErr) throw pcErr;
-      const productCountByCat: Record<string, number> = {};
-      (pcRows || []).forEach(r => { productCountByCat[r.category_id] = (productCountByCat[r.category_id] || 0) + 1; });
-      const childrenByParent: Record<string, number> = {};
-      catList.forEach(c => { if (c.parent_id) childrenByParent[c.parent_id] = (childrenByParent[c.parent_id] || 0) + 1; });
-      const enriched: EnrichedCategory[] = catList.map(c => ({
+
+      const { data: productRows, error: productErr } = await supabase
+        .from('products')
+        .select('id,category_id,parent_category_id');
+      if (productErr) throw productErr;
+
+      const directProductCount: Record<string, number> = {};
+      (productRows || []).forEach((row) => {
+        if (row.category_id) {
+          directProductCount[row.category_id] = (directProductCount[row.category_id] || 0) + 1;
+        }
+      });
+
+      const childrenByParent: Record<string, CategoryRow[]> = {};
+      catList.forEach((c) => {
+        if (c.parent_id) {
+          (childrenByParent[c.parent_id] ||= []).push(c);
+        }
+      });
+
+      const aggregatedCache = new Map<string, number>();
+      const computeAggregate = (id: string): number => {
+        if (aggregatedCache.has(id)) return aggregatedCache.get(id)!;
+        let total = directProductCount[id] || 0;
+        const kids = childrenByParent[id] || [];
+        kids.forEach((child) => { total += computeAggregate(child.id); });
+        aggregatedCache.set(id, total);
+        return total;
+      };
+
+      const enriched: EnrichedCategory[] = catList.map((c) => ({
         ...c,
-        productCount: productCountByCat[c.id] || 0,
-        childCount: childrenByParent[c.id] || 0
+        productCount: computeAggregate(c.id),
+        childCount: (childrenByParent[c.id] || []).length
       }));
       setCategories(enriched);
     } catch (e) {
@@ -118,6 +144,37 @@ const CategoryManager: React.FC = () => {
     }
   };
 
+  const openEditDialog = (cat: EnrichedCategory) => {
+    setEditingCategory(cat);
+    setEditName(cat.name);
+    setEditParent(cat.parent_id || '');
+  };
+
+  const updateCategory = async () => {
+    if (!editingCategory || !editName.trim()) return;
+    setUpdating(true);
+    try {
+      const slug = editName.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+      const { error } = await supabase
+        .from('categories')
+        .update({ 
+          name: editName.trim(), 
+          slug,
+          parent_id: editParent || null 
+        })
+        .eq('id', editingCategory.id);
+      if (error) throw error;
+      setEditingCategory(null);
+      setEditName('');
+      setEditParent('');
+      await fetchData();
+    } catch (e) {
+      console.error('Error updating category', e);
+    } finally {
+      setUpdating(false);
+    }
+  };
+
   const Row: React.FC<{ cat: EnrichedCategory; depth: number }> = ({ cat, depth }) => {
     const kids = children(cat.id);
     const expandedRow = expanded.has(cat.id);
@@ -137,6 +194,9 @@ const CategoryManager: React.FC = () => {
             {!cat.is_active && <Badge variant="destructive">inactiva</Badge>}
           </div>
           <div className="flex items-center gap-1">
+            <Button size="icon" variant="ghost" onClick={() => openEditDialog(cat)} title="Editar categoría">
+              <Pencil className="w-4 h-4 text-blue-600" />
+            </Button>
             <Button size="icon" variant="ghost" onClick={() => toggleActive(cat)} title={cat.is_active ? 'Desactivar (soft delete)' : 'Reactivar'}>
               {cat.is_active ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
             </Button>
@@ -201,6 +261,50 @@ const CategoryManager: React.FC = () => {
                 <Button type="button" variant="outline" disabled={deleting} onClick={() => setConfirmDelete(null)}>Cancelar</Button>
                 <Button type="button" variant="destructive" disabled={deleting} onClick={performDelete}>
                   {deleting ? 'Procesando...' : (canHardDelete(confirmDelete) ? 'Eliminar' : 'Desactivar')}
+                </Button>
+              </div>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!editingCategory} onOpenChange={() => !updating && setEditingCategory(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Editar categoría</DialogTitle>
+          </DialogHeader>
+          {editingCategory && (
+            <div className="space-y-4">
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Nombre de la categoría</label>
+                <Input 
+                  placeholder="Nombre" 
+                  value={editName} 
+                  onChange={e => setEditName(e.target.value)}
+                  disabled={updating}
+                />
+              </div>
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Categoría padre (opcional)</label>
+                <select 
+                  className="w-full border rounded-md px-3 py-2 text-sm"
+                  value={editParent} 
+                  onChange={e => setEditParent(e.target.value)}
+                  disabled={updating}
+                >
+                  <option value="">(Raíz - Sin padre)</option>
+                  {categories
+                    .filter(c => !c.parent_id && c.id !== editingCategory.id)
+                    .map(r => <option key={r.id} value={r.id}>{r.name}</option>)
+                  }
+                </select>
+              </div>
+              <div className="flex justify-end gap-2 pt-2">
+                <Button type="button" variant="outline" disabled={updating} onClick={() => setEditingCategory(null)}>
+                  Cancelar
+                </Button>
+                <Button type="button" disabled={updating || !editName.trim()} onClick={updateCategory}>
+                  {updating ? 'Actualizando...' : 'Actualizar'}
                 </Button>
               </div>
             </div>
