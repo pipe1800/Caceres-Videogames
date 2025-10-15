@@ -174,6 +174,20 @@ export class OrderService {
 
     return data;
   }
+
+  async listOrdersByReference(reference: string) {
+    const { data, error } = await supabase
+      .from('orders')
+      .select('*')
+      .eq('wompi_reference', reference);
+
+    if (error) {
+      console.error('Error listing orders:', error);
+      throw error;
+    }
+
+    return data ?? [];
+  }
 }
 
 export const orderService = new OrderService();

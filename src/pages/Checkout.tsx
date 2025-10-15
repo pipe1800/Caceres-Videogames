@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { elSalvadorDepartments, Department, Municipality } from '@/data/elSalvadorData';
 import { wompiService } from '@/integrations/wompi';
 import { orderService } from '@/integrations/supabase/orderService';
+import { notificationService } from '@/integrations/supabase/notificationService';
 
 interface CartItem {
   id: string;
@@ -168,6 +169,9 @@ const Checkout = () => {
 
     try {
       const orderReference = `ORDER-${Date.now()}`;
+      const subtotalAmount = getSubtotal();
+      const shippingAmount = deliveryType === 'delivery' ? 4 : 0;
+      const totalAmount = subtotalAmount + shippingAmount;
       
       // Store reference in localStorage for fallback
       localStorage.setItem('currentOrderReference', orderReference);
@@ -185,7 +189,7 @@ const Checkout = () => {
         customer_address: customerAddress || '',
         product_id: cartItems[0]?.id, // Keep for backward compatibility
         quantity: cartItems.reduce((total, item) => total + item.quantity, 0),
-        total_amount: getTotalPrice(),
+        total_amount: totalAmount,
         payment_method: paymentMethod === 'card' ? 'credit-debit' : 'cash',
         wompi_reference: orderReference, // Use wompi_reference which exists in the database
         payment_reference: orderReference, // Also set payment_reference since we added it
@@ -197,11 +201,80 @@ const Checkout = () => {
       };
 
       const order = await orderService.createOrder(orderData);
+      const relatedOrders = await orderService.listOrdersByReference(orderReference);
+
+      const orderIdByProductId = new Map<string, string>();
+      relatedOrders.forEach((entry: any) => {
+        if (entry?.product_id && entry?.id) {
+          orderIdByProductId.set(entry.product_id, entry.id);
+        }
+      });
+
+      const departmentInfo = elSalvadorDepartments.find((dept) => dept.id === selectedDepartment);
+      const departmentName = departmentInfo?.name;
+      const municipalityName = departmentInfo?.municipalities.find((muni) => muni.id === selectedMunicipality)?.name;
+      const deliveryPoint = deliveryPoints.find((point) => point.id === selectedDeliveryPoint);
+
+      const baseNotes: string[] = [];
+      baseNotes.push(`Total de artículos: ${cartItems.reduce((total, item) => total + item.quantity, 0)}`);
+      if (relatedOrders.length > 0) {
+        baseNotes.push(`Pedidos generados: ${relatedOrders.length}`);
+        baseNotes.push(
+          `IDs: ${relatedOrders.map((item: any) => item.id).join(', ')}`
+        );
+      }
+      if (deliveryType === 'delivery') {
+        baseNotes.push('Entrega a domicilio');
+      } else if (deliveryPoint) {
+        baseNotes.push(`Recoger en ${deliveryPoint.name} (${deliveryPoint.address})`);
+      }
+
+      const baseNotificationPayload = {
+        summary: {
+          orderId: order?.id ?? undefined,
+          orderReference,
+          paymentMethod: paymentMethod === 'card' ? 'Tarjeta (WOMPI)' : 'Efectivo contra entrega',
+          totalAmount,
+          currency: 'USD',
+          placedAt: new Date().toISOString(),
+          subtotal: subtotalAmount,
+          shippingAmount,
+        },
+        customer: {
+          name: orderData.customer_name,
+          email: orderData.customer_email,
+          phone: orderData.customer_phone || undefined,
+          address: customerAddress || undefined,
+          deliveryType,
+          deliveryPointName: deliveryPoint?.name,
+          deliveryDepartment: departmentName,
+          deliveryMunicipality: municipalityName,
+          pickupDetails: customerData.pickupDetails || undefined,
+        },
+        items: cartItems.map((item) => ({
+          id: item.id,
+          name: item.name,
+          quantity: item.quantity,
+          price: item.price,
+          image: item.image,
+          console: item.console,
+          orderId: orderIdByProductId.get(item.id),
+        })),
+      };
+
+      const buildNotificationPayload = (paymentStatus: string, additionalNotes: string[] = []) => ({
+        ...baseNotificationPayload,
+        summary: {
+          ...baseNotificationPayload.summary,
+          paymentStatus,
+        },
+        notes: [...baseNotes, ...additionalNotes].filter(Boolean).join('\n') || undefined,
+      });
 
       if (paymentMethod === 'card') {
         // Process WOMPI payment
         const paymentData = {
-          amount: getTotalPrice(),
+          amount: totalAmount,
           currency: 'USD',
           reference: orderReference,
           customerEmail: orderData.customer_email,
@@ -221,11 +294,15 @@ const Checkout = () => {
         // Create payment record
         await orderService.createPaymentRecord({
           order_id: order.id,
-          amount: getTotalPrice(),
+          amount: totalAmount,
           payment_method: 'credit-debit',
           processor_reference: orderReference,
           processor_payment_link: paymentResponse.data.payment_link_url,
         });
+
+        notificationService
+          .sendOrderNotification(buildNotificationPayload('processing', ['Pago con tarjeta en WOMPI']))
+          .catch((error) => console.error('Error sending order notification:', error));
 
         // Clear cart before redirecting
         localStorage.removeItem('cartItems');
@@ -242,9 +319,13 @@ const Checkout = () => {
         // Create payment record for cash
         await orderService.createPaymentRecord({
           order_id: order.id,
-          amount: getTotalPrice(),
+          amount: totalAmount,
           payment_method: 'cash',
         });
+
+        notificationService
+          .sendOrderNotification(buildNotificationPayload('pending', ['Pago en efectivo contra entrega']))
+          .catch((error) => console.error('Error sending order notification:', error));
 
         toast({
           title: "¡Pedido realizado!",
