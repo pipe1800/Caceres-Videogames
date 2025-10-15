@@ -13,6 +13,15 @@ import { LogOut, Package, ShoppingCart, Plus, Edit, Trash2, LayoutDashboard, Fol
 import { Product as DBProduct, Category as DBCategory } from '@/types/supabase';
 import EditProductModal from '@/components/admin/EditProductModal';
 import CategoryManager from '@/components/admin/CategoryManager';
+import {
+  SummaryCards,
+  RevenueTrendCard,
+  CategorySalesCard,
+  PaymentBreakdownCard,
+  LowStockCard,
+  TopProductsCard,
+} from '@/components/admin/dashboard';
+import { computeDashboardMetrics, DashboardMetrics } from '@/lib/dashboardMetrics';
 
 // Add order status types and options
 type OrderStatus = 'pendiente' | 'enviada' | 'completada' | 'cancelada';
@@ -26,18 +35,27 @@ const orderStatusOptions: { value: OrderStatus; label: string; color: string }[]
 
 interface Order {
   id: string;
+  product_id: string;
   customer_name: string;
   customer_email: string;
-  customer_phone?: string;
-  customer_address?: string;
+  customer_phone?: string | null;
+  customer_address?: string | null;
   total_amount: number;
-  status: string;
-  payment_method: string;
-  payment_status: string;
+  status: string | null;
+  payment_method: string | null;
+  payment_status: string | null;
   created_at: string;
-  products: {
+  products?: {
+    id: string;
     name: string;
-  };
+    price: number;
+    stock_count: number | null;
+    in_stock: boolean | null;
+    category_id?: string | null;
+    parent_category_id?: string | null;
+    console?: string | null;
+  } | null;
+  product?: Product | null;
   quantity: number;
 }
 
@@ -53,6 +71,7 @@ const AdminDashboard = () => {
   const { toast } = useToast();
   const [orders, setOrders] = useState<Order[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
+  const [metrics, setMetrics] = useState<DashboardMetrics | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [showEditProduct, setShowEditProduct] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
@@ -80,6 +99,7 @@ const AdminDashboard = () => {
         .from('orders')
         .select<any>(`
           id,
+          product_id,
           customer_name,
           customer_email,
           customer_phone,
@@ -90,7 +110,16 @@ const AdminDashboard = () => {
           payment_status,
           created_at,
           quantity,
-          products (name)
+          products:product_id (
+            id,
+            name,
+            price,
+            stock_count,
+            in_stock,
+            category_id,
+            parent_category_id,
+            console
+          )
         `)
         .order('created_at', { ascending: false });
 
@@ -118,10 +147,39 @@ const AdminDashboard = () => {
         return { ...base, childCategory: child, parentCategory: parent } as Product;
       });
 
-      setOrders(((ordersData ?? []) as any));
+      const productMap = new Map(normalizedProducts.map((product) => [product.id, product]));
+
+      const normalizedOrders: Order[] = (ordersData ?? []).map((order: any) => {
+        const product = productMap.get(order.product_id) ?? null;
+        return {
+          ...order,
+          total_amount: Number(order.total_amount ?? 0),
+          quantity: Number(order.quantity ?? 1),
+          product,
+        } as Order;
+      });
+
+      setOrders(normalizedOrders);
       setProducts(normalizedProducts);
+
+      const metricsResult = computeDashboardMetrics(
+        normalizedOrders.map((order) => ({
+          id: order.id,
+          product_id: order.product_id,
+          total_amount: Number(order.total_amount ?? 0),
+          quantity: Number(order.quantity ?? 1),
+          status: order.status ?? null,
+          payment_status: order.payment_status ?? null,
+          payment_method: order.payment_method ?? null,
+          created_at: order.created_at,
+        })),
+        normalizedProducts
+      );
+
+      setMetrics(metricsResult);
     } catch (error) {
       console.error('Error fetching data:', error);
+      setMetrics(null);
     } finally {
       setIsLoading(false);
     }
@@ -265,42 +323,36 @@ const AdminDashboard = () => {
           {/* Dashboard View */}
           {activeView === 'dashboard' && (
             <div className="space-y-6">
-              <h2 className="text-2xl font-bold">Dashboard</h2>
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-6">
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Órdenes Pendientes</CardTitle>
-                    <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">
-                      {orders.filter(order => order.status === 'pendiente').length}
-                    </div>
-                  </CardContent>
-                </Card>
-                
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Total Productos</CardTitle>
-                    <Package className="h-4 w-4 text-muted-foreground" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{products.length}</div>
-                  </CardContent>
-                </Card>
-                
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Productos Sin Stock</CardTitle>
-                    <Package className="h-4 w-4 text-muted-foreground" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">
-                      {products.filter(product => !product.in_stock || product.stock_count === 0).length}
-                    </div>
-                  </CardContent>
-                </Card>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                <h2 className="text-2xl font-bold">Dashboard</h2>
+                <p className="text-sm text-muted-foreground">
+                  Datos actualizados al {new Date().toLocaleString('es-SV')}
+                </p>
               </div>
+
+              {metrics ? (
+                <>
+                  <SummaryCards metrics={metrics} />
+
+                  <div className="grid grid-cols-1 xl:grid-cols-[2fr,1fr] gap-6">
+                    <RevenueTrendCard metrics={metrics} />
+                    <PaymentBreakdownCard metrics={metrics} />
+                  </div>
+
+                  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <CategorySalesCard metrics={metrics} />
+                    <LowStockCard metrics={metrics} />
+                  </div>
+
+                  <TopProductsCard metrics={metrics} />
+                </>
+              ) : (
+                <Card>
+                  <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                    Cargando métricas...
+                  </CardContent>
+                </Card>
+              )}
             </div>
           )}
 
