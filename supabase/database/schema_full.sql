@@ -86,13 +86,40 @@ ALTER FUNCTION "public"."increment_product_likes"("p_id" "uuid") OWNER TO "postg
 CREATE OR REPLACE FUNCTION "public"."restore_product_stock"() RETURNS "trigger"
     LANGUAGE "plpgsql"
     AS $$
+DECLARE
+  old_status text := lower(coalesce(OLD.status, ''));
+  new_status text := lower(coalesce(NEW.status, ''));
+  current_stock integer;
 BEGIN
-  -- Only restore stock if status changed from non-cancelled to cancelled
-  IF OLD.status != 'cancelled' AND NEW.status = 'cancelled' THEN
+  -- Restore stock when transitioning into a cancelled state
+  IF old_status NOT IN ('cancelada', 'cancelled')
+     AND new_status IN ('cancelada', 'cancelled') THEN
     UPDATE public.products
     SET 
       stock_count = stock_count + NEW.quantity,
-      in_stock = true,
+      in_stock = CASE WHEN stock_count + NEW.quantity > 0 THEN true ELSE false END,
+      updated_at = CURRENT_TIMESTAMP
+    WHERE id = NEW.product_id;
+  ELSIF old_status IN ('cancelada', 'cancelled')
+        AND new_status NOT IN ('cancelada', 'cancelled') THEN
+    SELECT stock_count INTO current_stock
+    FROM public.products
+    WHERE id = NEW.product_id
+    FOR UPDATE;
+
+    IF current_stock IS NULL THEN
+      RAISE EXCEPTION 'Product % not found', NEW.product_id;
+    END IF;
+
+    IF current_stock < NEW.quantity THEN
+      RAISE EXCEPTION 'Insufficient stock to reactivate order for product %, available %, requested %',
+        NEW.product_id, current_stock, NEW.quantity;
+    END IF;
+
+    UPDATE public.products
+    SET 
+      stock_count = current_stock - NEW.quantity,
+      in_stock = CASE WHEN current_stock - NEW.quantity > 0 THEN true ELSE false END,
       updated_at = CURRENT_TIMESTAMP
     WHERE id = NEW.product_id;
   END IF;
@@ -183,78 +210,45 @@ $$;
 ALTER FUNCTION "public"."update_order_payment_status"("order_id" "uuid", "new_status" "text", "transaction_id" "text") OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."update_product_stock_on_payment_confirmation"() RETURNS "trigger"
+CREATE OR REPLACE FUNCTION "public"."reserve_product_stock_on_order_insert"() RETURNS "trigger"
     LANGUAGE "plpgsql"
     AS $$
+DECLARE
+  current_stock integer;
 BEGIN
-  -- Only process when payment status changes to 'approved' for card payments
-  IF NEW.payment_status = 'approved' AND OLD.payment_status != 'approved' AND NEW.payment_method IN ('credit-debit', 'card') THEN
-    -- Decrease stock count
-    UPDATE public.products
-    SET 
-      stock_count = stock_count - NEW.quantity,
-      in_stock = CASE 
-        WHEN stock_count - NEW.quantity <= 0 THEN false 
-        ELSE true 
-      END,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = NEW.product_id;
-    
-    -- Check if stock would go negative
-    IF (SELECT stock_count FROM public.products WHERE id = NEW.product_id) < 0 THEN
-      RAISE EXCEPTION 'Insufficient stock for product';
-    END IF;
+  IF NEW.quantity IS NULL OR NEW.quantity <= 0 THEN
+    RAISE EXCEPTION 'Invalid quantity for product %', NEW.product_id;
   END IF;
-  
+
+  SELECT stock_count INTO current_stock
+  FROM public.products
+  WHERE id = NEW.product_id
+  FOR UPDATE;
+
+  IF current_stock IS NULL THEN
+    RAISE EXCEPTION 'Product % not found', NEW.product_id;
+  END IF;
+
+  IF current_stock < NEW.quantity THEN
+    RAISE EXCEPTION 'Insufficient stock for product %, available %, requested %',
+      NEW.product_id, current_stock, NEW.quantity;
+  END IF;
+
+  UPDATE public.products
+  SET 
+    stock_count = current_stock - NEW.quantity,
+    in_stock = CASE WHEN current_stock - NEW.quantity > 0 THEN true ELSE false END,
+    updated_at = CURRENT_TIMESTAMP
+  WHERE id = NEW.product_id;
+
   RETURN NEW;
 END;
 $$;
 
 
-ALTER FUNCTION "public"."update_product_stock_on_payment_confirmation"() OWNER TO "postgres";
+ALTER FUNCTION "public"."reserve_product_stock_on_order_insert"() OWNER TO "postgres";
 
 
-CREATE OR REPLACE FUNCTION "public"."update_product_stock_on_status_change"() RETURNS "trigger"
-    LANGUAGE "plpgsql"
-    AS $$
-BEGIN
-  -- Only process stock changes for specific status transitions
-  -- For cash orders: reduce stock when status changes to 'completed'
-  -- For card orders: this will be handled by payment confirmation
-  IF NEW.status = 'completed' AND OLD.status != 'completed' AND NEW.payment_method = 'cash' THEN
-    -- Decrease stock count
-    UPDATE public.products
-    SET 
-      stock_count = stock_count - NEW.quantity,
-      in_stock = CASE 
-        WHEN stock_count - NEW.quantity <= 0 THEN false 
-        ELSE true 
-      END,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = NEW.product_id;
-    
-    -- Check if stock would go negative
-    IF (SELECT stock_count FROM public.products WHERE id = NEW.product_id) < 0 THEN
-      RAISE EXCEPTION 'Insufficient stock for product';
-    END IF;
-  END IF;
-  
-  -- Restore stock when order is cancelled (for both payment methods)
-  IF NEW.status = 'cancelled' AND OLD.status != 'cancelled' THEN
-    UPDATE public.products
-    SET 
-      stock_count = stock_count + NEW.quantity,
-      in_stock = true,
-      updated_at = CURRENT_TIMESTAMP
-    WHERE id = NEW.product_id;
-  END IF;
-  
-  RETURN NEW;
-END;
-$$;
-
-
-ALTER FUNCTION "public"."update_product_stock_on_status_change"() OWNER TO "postgres";
 
 
 CREATE OR REPLACE FUNCTION "public"."update_updated_at_column"() RETURNS "trigger"
@@ -484,6 +478,9 @@ CREATE INDEX "idx_products_parent_category_id" ON "public"."products" USING "btr
 
 
 
+CREATE OR REPLACE TRIGGER "reserve_stock_on_order_insert" BEFORE INSERT ON "public"."orders" FOR EACH ROW EXECUTE FUNCTION "public"."reserve_product_stock_on_order_insert"();
+
+
 CREATE OR REPLACE TRIGGER "restore_stock_on_order_cancel" AFTER UPDATE ON "public"."orders" FOR EACH ROW EXECUTE FUNCTION "public"."restore_product_stock"();
 
 
@@ -512,11 +509,9 @@ CREATE OR REPLACE TRIGGER "update_payments_updated_at" BEFORE UPDATE ON "public"
 
 
 
-CREATE OR REPLACE TRIGGER "update_stock_on_order_status_change" AFTER UPDATE ON "public"."orders" FOR EACH ROW EXECUTE FUNCTION "public"."update_product_stock_on_status_change"();
 
 
 
-CREATE OR REPLACE TRIGGER "update_stock_on_payment_confirmation" AFTER UPDATE ON "public"."orders" FOR EACH ROW EXECUTE FUNCTION "public"."update_product_stock_on_payment_confirmation"();
 
 
 
@@ -630,6 +625,11 @@ GRANT ALL ON FUNCTION "public"."restore_product_stock"() TO "service_role";
 
 
 
+GRANT ALL ON FUNCTION "public"."reserve_product_stock_on_order_insert"() TO "anon";
+GRANT ALL ON FUNCTION "public"."reserve_product_stock_on_order_insert"() TO "authenticated";
+GRANT ALL ON FUNCTION "public"."reserve_product_stock_on_order_insert"() TO "service_role";
+
+
 GRANT ALL ON FUNCTION "public"."set_updated_at"() TO "anon";
 GRANT ALL ON FUNCTION "public"."set_updated_at"() TO "authenticated";
 GRANT ALL ON FUNCTION "public"."set_updated_at"() TO "service_role";
@@ -642,15 +642,9 @@ GRANT ALL ON FUNCTION "public"."update_order_payment_status"("order_id" "uuid", 
 
 
 
-GRANT ALL ON FUNCTION "public"."update_product_stock_on_payment_confirmation"() TO "anon";
-GRANT ALL ON FUNCTION "public"."update_product_stock_on_payment_confirmation"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."update_product_stock_on_payment_confirmation"() TO "service_role";
 
 
 
-GRANT ALL ON FUNCTION "public"."update_product_stock_on_status_change"() TO "anon";
-GRANT ALL ON FUNCTION "public"."update_product_stock_on_status_change"() TO "authenticated";
-GRANT ALL ON FUNCTION "public"."update_product_stock_on_status_change"() TO "service_role";
 
 
 

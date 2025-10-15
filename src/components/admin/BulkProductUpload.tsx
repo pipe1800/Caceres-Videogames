@@ -1,11 +1,11 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Upload, Download, AlertCircle, CheckCircle, Images, Trash2, Save, FileSpreadsheet } from 'lucide-react';
+import { Upload, AlertCircle, CheckCircle, Images, Trash2, Save, FileSpreadsheet, FolderUp, Loader2 } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import ImageUpload from '@/components/admin/ImageUpload';
 
@@ -46,6 +46,15 @@ interface ParsedProduct {
   selectedChildCategoryId?: string;
 }
 
+interface FolderUploadSummary {
+  totalFiles: number;
+  uploadedFiles: number;
+  skippedFiles: number;
+  processedSkus: string[];
+  skusWithoutParsedProduct: string[];
+  errors: string[];
+}
+
 const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
   const [file, setFile] = useState<File | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -54,6 +63,17 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
   const [imagesBySku, setImagesBySku] = useState<Record<string, string[]>>({});
   const [expandedSku, setExpandedSku] = useState<string | null>(null);
   const [categories, setCategories] = useState<CategoryRow[]>([]);
+  const [isUploadingFolders, setIsUploadingFolders] = useState(false);
+  const [folderUploadSummary, setFolderUploadSummary] = useState<FolderUploadSummary | null>(null);
+  const folderInputRef = useRef<HTMLInputElement | null>(null);
+  const setFolderInputRef = useCallback((node: HTMLInputElement | null) => {
+    if (node) {
+      node.setAttribute('directory', '');
+      node.setAttribute('webkitdirectory', '');
+      node.setAttribute('mozdirectory', '');
+    }
+    folderInputRef.current = node;
+  }, []);
 
   const normalize = (value: string) => value.trim().toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '');
 
@@ -70,6 +90,10 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
   }, [categories, normalize]);
 
   const parentCategories = useMemo(() => categories.filter((c) => !c.parent_id), [categories]);
+
+  const knownSkus = useMemo(() => {
+    return new Set(parsedProducts.map((product) => product.sku.trim().toLowerCase()));
+  }, [parsedProducts]);
 
   const childCategoriesByParent = useMemo(() => {
     const map = new Map<string, CategoryRow[]>();
@@ -398,6 +422,200 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
     return Array.from(set);
   };
 
+  const extractSkuToken = (folderName: string): string => {
+    const trimmed = folderName.trim();
+    if (!trimmed) return '';
+    const match = trimmed.match(/^([^\s/\\]+)/);
+    const token = match && match[1] ? match[1] : trimmed;
+    return token.replace(/[^A-Za-z0-9_-]/g, '');
+  };
+
+  const detectSkuFromRelativePath = (relativePath: string) => {
+    const normalized = relativePath.replace(/\\/g, '/');
+    const segments = normalized.split('/').filter(Boolean);
+    if (segments.length === 0) {
+      return { sku: '', folder: '', filename: '' } as const;
+    }
+    const filename = segments[segments.length - 1];
+    const folderSegments = segments.slice(0, -1);
+
+    let candidateFolder = folderSegments.find((segment) => {
+      const candidateSku = extractSkuToken(segment);
+      return candidateSku && knownSkus.has(candidateSku.toLowerCase());
+    });
+
+    if (!candidateFolder && folderSegments.length > 0) {
+      candidateFolder = folderSegments.find((segment) => /\d/.test(extractSkuToken(segment))) || folderSegments[0];
+    }
+
+    const sku = candidateFolder ? extractSkuToken(candidateFolder) : '';
+    return { sku, folder: candidateFolder ?? '', filename } as const;
+  };
+
+  const sanitizeFileName = (name: string) => {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      return `image-${Date.now()}.jpg`;
+    }
+    const lastDot = trimmed.lastIndexOf('.');
+    if (lastDot === -1) {
+      return trimmed.replace(/[^A-Za-z0-9_-]/g, '-');
+    }
+    const base = trimmed.slice(0, lastDot).replace(/[^A-Za-z0-9_-]/g, '-');
+    const ext = trimmed.slice(lastDot + 1).replace(/[^A-Za-z0-9]/g, '');
+    const safeBase = base || 'image';
+    const safeExt = ext || 'jpg';
+    return `${safeBase}.${safeExt.toLowerCase()}`;
+  };
+
+  const handleFolderUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+
+    setIsUploadingFolders(true);
+    setFolderUploadSummary(null);
+
+    try {
+      const summary = {
+        totalFiles: files.length,
+        uploadedFiles: 0,
+        skippedFiles: 0,
+        processedSkus: new Set<string>(),
+        skusWithoutParsedProduct: new Set<string>(),
+        errors: [] as string[]
+      };
+
+      const filesBySku = new Map<string, File[]>();
+      const unknownSkuPaths = new Set<string>();
+
+      Array.from(files).forEach((file) => {
+        const relativePath = (file as any).webkitRelativePath || file.name;
+        const { sku } = detectSkuFromRelativePath(relativePath);
+
+        if (!sku) {
+          summary.skippedFiles += 1;
+          unknownSkuPaths.add(relativePath);
+          return;
+        }
+
+        if (!filesBySku.has(sku)) {
+          filesBySku.set(sku, []);
+        }
+        filesBySku.get(sku)!.push(file);
+
+        if (knownSkus.size > 0 && !knownSkus.has(sku.toLowerCase())) {
+          summary.skusWithoutParsedProduct.add(sku);
+        }
+      });
+
+      const uploadsPerSku: { sku: string; urls: string[] }[] = [];
+      const allowedTypes = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
+
+      for (const [sku, skuFiles] of filesBySku.entries()) {
+        const uploadedUrls: string[] = [];
+        const usedNames = new Set<string>();
+
+        const orderedFiles = skuFiles.slice().sort((a, b) => {
+          const pathA = ((a as any).webkitRelativePath || a.name).toLowerCase();
+          const pathB = ((b as any).webkitRelativePath || b.name).toLowerCase();
+          return pathA.localeCompare(pathB);
+        });
+
+        for (const file of orderedFiles) {
+          if (file.type && !allowedTypes.has(file.type)) {
+            summary.skippedFiles += 1;
+            summary.errors.push(`SKU ${sku}: ${file.name} tiene un formato no soportado (${file.type || 'desconocido'}).`);
+            continue;
+          }
+
+          const baseName = sanitizeFileName(file.name);
+          let safeName = baseName;
+          let counter = 1;
+          while (usedNames.has(safeName)) {
+            const dotIndex = baseName.lastIndexOf('.');
+            if (dotIndex === -1) {
+              safeName = `${baseName}-${counter}`;
+            } else {
+              const nameOnly = baseName.slice(0, dotIndex);
+              const ext = baseName.slice(dotIndex);
+              safeName = `${nameOnly}-${counter}${ext}`;
+            }
+            counter += 1;
+          }
+          usedNames.add(safeName);
+
+          const storagePath = `${sku}/${safeName}`;
+          const { error } = await supabase.storage
+            .from('product-images')
+            .upload(storagePath, file, { upsert: true });
+
+          if (error) {
+            summary.skippedFiles += 1;
+            summary.errors.push(`SKU ${sku}: error subiendo ${file.name} (${error.message}).`);
+            continue;
+          }
+
+          const { data } = supabase.storage.from('product-images').getPublicUrl(storagePath);
+          if (data?.publicUrl) {
+            uploadedUrls.push(data.publicUrl);
+            summary.uploadedFiles += 1;
+          }
+        }
+
+        if (uploadedUrls.length > 0) {
+          uploadsPerSku.push({ sku, urls: uploadedUrls });
+          summary.processedSkus.add(sku);
+        }
+      }
+
+      if (uploadsPerSku.length > 0) {
+        setImagesBySku((prev) => {
+          const next = { ...prev };
+          uploadsPerSku.forEach(({ sku, urls }) => {
+            const existing = next[sku] ? [...next[sku]] : [];
+            urls.forEach((url) => {
+              if (!existing.includes(url)) {
+                existing.push(url);
+              }
+            });
+            next[sku] = existing;
+          });
+          return next;
+        });
+      }
+
+      if (unknownSkuPaths.size > 0) {
+        unknownSkuPaths.forEach((path) => {
+          summary.errors.push(`No se detectó SKU en la ruta "${path}".`);
+        });
+      }
+
+      setFolderUploadSummary({
+        totalFiles: summary.totalFiles,
+        uploadedFiles: summary.uploadedFiles,
+        skippedFiles: summary.skippedFiles,
+        processedSkus: Array.from(summary.processedSkus).sort(),
+        skusWithoutParsedProduct: Array.from(summary.skusWithoutParsedProduct).sort(),
+        errors: summary.errors
+      });
+    } catch (error) {
+      console.error('Error during folder upload processing:', error);
+      setFolderUploadSummary({
+        totalFiles: files.length,
+        uploadedFiles: 0,
+        skippedFiles: files.length,
+        processedSkus: [],
+        skusWithoutParsedProduct: [],
+        errors: ['Error inesperado al procesar la carpeta. Revisa la consola para más detalles.']
+      });
+    } finally {
+      if (event.target) {
+        event.target.value = '';
+      }
+      setIsUploadingFolders(false);
+    }
+  };
+
   const getPrimaryConsole = (cats: string[]): string => {
     const consoles = [
       'Nintendo Switch',
@@ -694,10 +912,81 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
           )}
         </div>
         
+        <div className="space-y-3 rounded-lg border border-dashed border-gray-300 bg-gray-50/60 p-4">
+          <div className="flex flex-col gap-2">
+            <Label className="text-sm font-medium">Cargar carpeta de imágenes por SKU</Label>
+            <p className="text-xs text-gray-600">
+              Selecciona un directorio que contenga subcarpetas cuyos nombres inicien con el SKU (por ejemplo, <span className="font-mono">SKU123 Juego</span>). Cada imagen se guardará en Supabase dentro de <span className="font-mono">SKU/archivo</span> y se asociará automáticamente a la fila correspondiente.
+            </p>
+          </div>
+          <div className="flex flex-col sm:flex-row gap-2">
+            <Input
+              ref={setFolderInputRef}
+              id="folder-upload"
+              type="file"
+              multiple
+              accept="image/*"
+              onChange={handleFolderUpload}
+              className="hidden"
+            />
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => folderInputRef.current?.click()}
+              disabled={isUploadingFolders}
+              className="flex items-center gap-2 w-full sm:w-auto"
+            >
+              {isUploadingFolders ? (
+                <>
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Subiendo imágenes...
+                </>
+              ) : (
+                <>
+                  <FolderUp className="h-4 w-4" />
+                  Seleccionar carpeta de imágenes
+                </>
+              )}
+            </Button>
+          </div>
+          {folderUploadSummary && (
+            <div className="rounded-md border border-gray-200 bg-white p-3 text-sm space-y-1">
+              <p className="font-medium text-gray-700">
+                {folderUploadSummary.uploadedFiles} de {folderUploadSummary.totalFiles} archivos procesados correctamente.
+              </p>
+              {folderUploadSummary.processedSkus.length > 0 && (
+                <p className="text-gray-600">
+                  SKUs actualizados: <span className="font-medium">{folderUploadSummary.processedSkus.join(', ')}</span>
+                </p>
+              )}
+              {folderUploadSummary.skusWithoutParsedProduct.length > 0 && (
+                <p className="text-amber-600">
+                  Aviso: No se encontró producto cargado para {folderUploadSummary.skusWithoutParsedProduct.length === 1 ? 'el SKU' : 'los SKUs'} {folderUploadSummary.skusWithoutParsedProduct.join(', ')}.
+                </p>
+              )}
+              {folderUploadSummary.skippedFiles > 0 && (
+                <p className="text-gray-600">
+                  Archivos omitidos: {folderUploadSummary.skippedFiles}
+                </p>
+              )}
+              {folderUploadSummary.errors.length > 0 && (
+                <details className="text-red-600">
+                  <summary className="cursor-pointer text-sm font-medium">Ver detalles de errores</summary>
+                  <ul className="mt-1 list-disc space-y-1 pl-5 text-[13px]">
+                    {folderUploadSummary.errors.map((error, idx) => (
+                      <li key={idx}>{error}</li>
+                    ))}
+                  </ul>
+                </details>
+              )}
+            </div>
+          )}
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <Button
             onClick={handleParse}
-            disabled={!file || isProcessing}
+            disabled={!file || isProcessing || isUploadingFolders}
             className="w-full"
             variant="secondary"
           >
@@ -705,7 +994,7 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
           </Button>
           <Button
             onClick={processAll}
-            disabled={parsedProducts.length === 0 || isProcessing}
+            disabled={parsedProducts.length === 0 || isProcessing || isUploadingFolders}
             className="w-full"
           >
             {isProcessing ? 'Procesando...' : 'Procesar todos'}
@@ -803,7 +1092,7 @@ const BulkProductUpload = ({ onProductsProcessed }: BulkProductUploadProps) => {
                               type="button"
                               variant="secondary"
                               onClick={() => saveSingle(p.sku)}
-                              disabled={hasErrors || imageError || isProcessing}
+                              disabled={hasErrors || imageError || isProcessing || isUploadingFolders}
                               className="flex items-center gap-2"
                             >
                               <Save className="h-4 w-4" />
