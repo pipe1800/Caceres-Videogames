@@ -1,4 +1,4 @@
-import { supabase } from './supabaseClient';
+import { supabase } from './client';
 
 export interface OrderData {
   customer_name: string;

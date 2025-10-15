@@ -1,6 +1,6 @@
 import { WOMPI_CONFIG } from './config';
 import type { PaymentData, PaymentLinkResponse, PaymentStatusResponse } from './types';
-import { supabase } from '../supabase/supabaseClient';
+import { supabase } from '../supabase/client';
 
 export class WompiService {
   async createPaymentLink(paymentData: PaymentData): Promise<PaymentLinkResponse> {

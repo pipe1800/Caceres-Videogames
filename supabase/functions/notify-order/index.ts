@@ -329,13 +329,17 @@ serve(async (req) => {
       }),
     });
 
+    const responseJson = await response.json().catch(async () => ({ raw: await response.text() }));
+
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`Resend API error: ${response.status} ${errorText}`);
+      console.error('Resend API error response:', responseJson);
+      throw new Error(`Resend API error: ${response.status} ${JSON.stringify(responseJson)}`);
     }
 
+    console.log('Resend API success response:', responseJson);
+
     return new Response(
-      JSON.stringify({ success: true }),
+      JSON.stringify({ success: true, resend: responseJson }),
       {
         status: 200,
         headers: {

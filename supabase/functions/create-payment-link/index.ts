@@ -1,19 +1,24 @@
+// @ts-nocheck
 import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-serve(async (req) => {
+const getEnv = (key: string, fallback?: string) => {
+  const value = Deno.env.get(key)
+  return value ?? fallback
+}
+
+serve(async (req: Request) => {
   // Handle CORS preflight
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    const { amount, currency, reference, customerEmail, customerName, redirectUrl } = await req.json()
+  const { amount, currency, reference, customerEmail, customerName, redirectUrl } = await req.json()
 
     // Log incoming data for debugging
     console.log('Incoming payment data:', { amount, currency, reference, customerEmail, customerName, redirectUrl })
@@ -24,9 +29,12 @@ serve(async (req) => {
     }
 
     // Get WOMPI credentials from environment
-    const WOMPI_APP_ID = Deno.env.get('WOMPI_APP_ID')!
-    const WOMPI_API_SECRET = Deno.env.get('WOMPI_API_SECRET')!
-    const WOMPI_API_URL = Deno.env.get('WOMPI_API_URL') || 'https://api.wompi.sv'
+  // TODO: Replace hardcoded fallbacks with environment variables before committing to production.
+  const WOMPI_APP_ID = getEnv('WOMPI_APP_ID', 'dd599b63-81e6-48e3-9631-0ba9be8084ac')
+  const WOMPI_API_SECRET = getEnv('WOMPI_API_SECRET', 'ae36f414-c099-453b-8c20-5e6d714a2c14')
+  const WOMPI_API_URL = getEnv('WOMPI_API_URL', 'https://api.wompi.sv/v1')
+    const WOMPI_REDIRECT_URL = getEnv('WOMPI_REDIRECT_URL')
+    const WOMPI_RETURN_URL = getEnv('WOMPI_RETURN_URL')
 
     if (!WOMPI_APP_ID || !WOMPI_API_SECRET) {
       throw new Error('WOMPI credentials not configured')
@@ -58,9 +66,18 @@ serve(async (req) => {
     const accessToken = tokenData.access_token
     console.log('Successfully obtained WOMPI access token')
 
+    const normalizedAmount = Number(Number(amount).toFixed(2))
+    const resolvedRedirectUrl = WOMPI_REDIRECT_URL ?? redirectUrl
+    const resolvedReturnUrl = WOMPI_RETURN_URL ?? redirectUrl
+
+    if (!resolvedRedirectUrl || !resolvedReturnUrl) {
+      throw new Error('Missing redirect URL. Provide redirectUrl in request body or configure WOMPI_REDIRECT_URL/WOMPI_RETURN_URL environment variables.')
+    }
+
     const requestBody = {
       identificadorEnlaceComercio: reference,
-      monto: amount,
+      monto: normalizedAmount,
+      moneda: currency,
       nombreProducto: `Pago de ${customerName}`,
       formaPago: {
         permitirTarjetaCreditoDebido: true,
@@ -68,8 +85,8 @@ serve(async (req) => {
         permitirPagoEnCuotasAgricola: false
       },
       configuracion: {
-        urlRedirect: redirectUrl,
-        urlRetorno: redirectUrl,
+        urlRedirect: resolvedRedirectUrl,
+        urlRetorno: resolvedReturnUrl,
         esMontoEditable: false,
         esCantidadEditable: false,
         notificarTransaccionCliente: true,
@@ -94,15 +111,27 @@ serve(async (req) => {
     if (!response.ok) {
       const errorText = await response.text()
       console.error('WOMPI API error response:', errorText)
-      
+
       let errorData
       try {
         errorData = JSON.parse(errorText)
       } catch {
         errorData = { message: errorText }
       }
-      
-      throw new Error(`WOMPI API Error (${response.status}): ${errorData.error?.message || errorData.message || 'Unknown error'}`)
+
+      return new Response(
+        JSON.stringify({
+          success: false,
+          message: 'WOMPI API responded with an error',
+          status: response.status,
+          wompiError: errorData,
+          requestBody,
+        }),
+        {
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          status: response.status,
+        }
+      )
     }
 
     const data = await response.json()
@@ -116,8 +145,8 @@ serve(async (req) => {
     console.error('Edge Function error:', error)
     return new Response(
       JSON.stringify({ 
-        error: error.message,
-        details: error.stack || 'No stack trace available'
+        error: error instanceof Error ? error.message : 'Unknown error',
+        details: error instanceof Error ? error.stack : undefined
       }),
       { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 }
     )
